@@ -536,7 +536,12 @@ export function extractAssistantSegmentsPayloadScript(): string {
                 fpath = spans[0].textContent || '';
             }
         }
-        if (!fpath) fpath = (editNode.textContent || '').trim();
+        if (!fpath) {
+            fpath = (editNode.textContent || '').trim();
+            if (fpath.endsWith(ftype)) {
+                fpath = fpath.slice(0, -ftype.length).trim();
+            }
+        }
         if (fpath) {
             segments.push({
                 kind: 'file-change',
@@ -563,8 +568,21 @@ export function extractAssistantSegmentsPayloadScript(): string {
             });
         }
     }
-
-
+    // 4e. File Changes Text Blocks
+    var fcbNodes = scope.querySelectorAll('.file-changes-block code, [class*="file-changes"] code');
+    for (var fci = 0; fci < fcbNodes.length; fci++) {
+        var fcNode = fcbNodes[fci];
+        var fcText = (fcNode.textContent || '').trim();
+        if (fcText) {
+            segments.push({
+                kind: 'file-changes',
+                text: fcText,
+                role: 'assistant',
+                messageIndex: 0,
+                domPath: 'file-changes:nth(' + fci + ')'
+            });
+        }
+    }
 
     if (!bodyFound && segments.length === 0) return null;
 

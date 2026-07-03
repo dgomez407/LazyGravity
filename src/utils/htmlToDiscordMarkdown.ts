@@ -54,7 +54,7 @@ export function htmlToDiscordMarkdown(html: string): string {
     
     // First, Antigravity 2.0 wrapped code blocks
     result = result.replace(
-        /<div[^>]*class="[^"]*code-block[^"]*"[^>]*>[\s\S]*?<div[^>]*class="[^"]*code-header[^"]*"[^>]*>([\s\S]*?)<\/div>[\s\S]*?<pre[^>]*>\s*<code[^>]*>([\s\S]*?)<\/code>\s*<\/pre>[\s\S]*?<\/div>/gi,
+        /<div[^>]*class="[^"]*code-block[^"]*"[^>]*>(?:(?!<div[^>]*class="[^"]*code-block[^"]*"[^>]*>)[\s\S])*?<div[^>]*class="[^"]*code-header[^"]*"[^>]*>([\s\S]*?)<\/div>(?:(?!<div[^>]*class="[^"]*code-block[^"]*"[^>]*>)[\s\S])*?<pre[^>]*>\s*<code[^>]*>([\s\S]*?)<\/code>\s*<\/pre>(?:(?!<div[^>]*class="[^"]*code-block[^"]*"[^>]*>)[\s\S])*?<\/div>/gi,
         (_m, lang, content) => `\n\`\`\`${stripTags(lang).trim()}\n${content}\n\`\`\`\n`
     );
 

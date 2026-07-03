@@ -329,14 +329,17 @@ export class ArtifactService {
     }
 
     /**
-     * Read the markdown content of a specific artifact file.
-     * Returns null if the file cannot be read.
+     * Build the filesystem path for a specific artifact file.
      */
     getArtifactPath(conversationId: string, filename: string): string {
         const safe = path.basename(filename);
         return path.join(this.brainBasePath, conversationId, safe);
     }
 
+    /**
+     * Read the markdown content of a specific artifact file.
+     * Returns null if the file cannot be read.
+     */
     getArtifactContent(conversationId: string, filename: string): string | null {
         // Sanitize: prevent path traversal
         const safe = path.basename(filename);

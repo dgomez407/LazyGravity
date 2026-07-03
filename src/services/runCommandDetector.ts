@@ -1,3 +1,4 @@
+import { ConsecutiveEmptyPollGate } from '../utils/consecutiveEmptyPollGate';
 import { logger } from '../utils/logger';
 import { CdpService } from './cdpService';
 import { buildClickScript } from './approvalDetector';
@@ -137,10 +138,8 @@ export class RunCommandDetector {
     private lastDetectedKey: string | null = null;
     /** Full RunCommandInfo from the last detection */
     private lastDetectedInfo: RunCommandInfo | null = null;
-    /** Number of consecutive polls without detecting buttons */
-    private emptyPollCount: number = 0;
-    /** Number of consecutive empty polls required before resetting state */
-    private static readonly REQUIRED_EMPTY_POLLS = 3;
+    /** Gate for empty polls before reset */
+    private emptyPollGate = new ConsecutiveEmptyPollGate(3);
 
     constructor(options: RunCommandDetectorOptions) {
         this.cdpService = options.cdpService;
@@ -155,7 +154,7 @@ export class RunCommandDetector {
         this.isRunning = true;
         this.lastDetectedKey = null;
         this.lastDetectedInfo = null;
-        this.emptyPollCount = 0;
+        this.emptyPollGate.reset();
         this.schedulePoll();
     }
 
@@ -206,7 +205,7 @@ export class RunCommandDetector {
             const info: RunCommandInfo | null = result?.result?.value ?? null;
 
             if (info) {
-                this.emptyPollCount = 0;
+                this.emptyPollGate.recordDetection();
                 // Duplicate prevention: use commandText as key
                 const key = `${info.commandText}::${info.workingDirectory}`;
                 if (key !== this.lastDetectedKey) {
@@ -215,8 +214,7 @@ export class RunCommandDetector {
                     this.onRunCommandRequired(info);
                 }
             } else {
-                this.emptyPollCount++;
-                if (this.emptyPollCount >= RunCommandDetector.REQUIRED_EMPTY_POLLS) {
+                if (this.emptyPollGate.recordEmptyPoll()) {
                     const wasDetected = this.lastDetectedKey !== null;
                     this.lastDetectedKey = null;
                     this.lastDetectedInfo = null;

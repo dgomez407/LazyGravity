@@ -49,13 +49,13 @@ describe('discordResponseRenderer', () => {
         expect((output.embeds![1] as any).data.description).toBe('Plan: Do A then B.');
     });
 
-    it('renders action buttons in a component row', () => {
+    it('renders action buttons in a component row and formats customIds correctly', () => {
         const result: ClassifyResult = {
             finalOutputText: 'Ready.',
             activityLines: [],
             feedback: [],
             planCards: [],
-            actionButtons: ['Proceed', 'Open'],
+            actionButtons: ['Proceed', 'Open File', 'Review Code'],
             fileChanges: [],
             citations: [],
             fileChangesTexts: [],
@@ -65,9 +65,19 @@ describe('discordResponseRenderer', () => {
 
         const output = renderDiscordResponse(result);
         expect(output.components).toBeDefined();
-        expect((output.components![0] as any).components.length).toBe(2);
-        expect((output.components![0] as any).components[0].data.label).toBe('Proceed');
-        expect((output.components![0] as any).components[1].data.label).toBe('Open');
+        expect((output.components![0] as any).components.length).toBe(3);
+        
+        const btn1 = (output.components![0] as any).components[0].data;
+        expect(btn1.label).toBe('Proceed');
+        expect(btn1.custom_id).toBe('action_btn_proceed');
+        
+        const btn2 = (output.components![0] as any).components[1].data;
+        expect(btn2.label).toBe('Open File');
+        expect(btn2.custom_id).toBe('action_btn_open_file');
+
+        const btn3 = (output.components![0] as any).components[2].data;
+        expect(btn3.label).toBe('Review Code');
+        expect(btn3.custom_id).toBe('action_btn_review_code');
     });
 
     it('chunks very long descriptions', () => {

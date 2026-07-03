@@ -86,8 +86,14 @@ export function renderDiscordResponse(result: ClassifyResult): MessageCreateOpti
         // Chunk into fields if necessary (max 25 fields, 1024 chars per field)
         let currentFieldVal = '';
         let fieldCount = 0;
+        let processedCount = 0;
+        let truncated = false;
         
         for (const file of result.fileChanges) {
+            if (fieldCount >= 24) {
+                truncated = true;
+                break;
+            }
             const line = `- \`${file.path}\` (${file.type})\n`;
             if (line.length > 1000) {
                 if (currentFieldVal) {
@@ -97,9 +103,12 @@ export function renderDiscordResponse(result: ClassifyResult): MessageCreateOpti
                 }
                 const splitLine = chunkText(line, 1000);
                 for (const sl of splitLine) {
+                    if (fieldCount >= 24) {
+                        truncated = true;
+                        break;
+                    }
                     embed.addFields({ name: fieldCount === 0 ? 'Files' : '...', value: sl || '-' });
                     fieldCount++;
-                    if (fieldCount >= 24) break;
                 }
             } else if (currentFieldVal.length + line.length > 1000) {
                 if (currentFieldVal) {
@@ -107,13 +116,20 @@ export function renderDiscordResponse(result: ClassifyResult): MessageCreateOpti
                     fieldCount++;
                 }
                 currentFieldVal = line;
-                if (fieldCount >= 24) break; // Leave one just in case
             } else {
                 currentFieldVal += line;
             }
+            if (!truncated) {
+                processedCount++;
+            }
         }
-        if (currentFieldVal) {
+        if (currentFieldVal && fieldCount < 24) {
             embed.addFields({ name: fieldCount === 0 ? 'Files' : '...', value: currentFieldVal });
+            fieldCount++;
+        }
+        if (processedCount < result.fileChanges.length) {
+            const remaining = result.fileChanges.length - processedCount;
+            embed.addFields({ name: '...', value: `*...and ${remaining} more*` });
         }
         
         embeds.push(embed);

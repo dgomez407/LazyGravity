@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger';
+import { ConsecutiveEmptyPollGate } from '../utils/consecutiveEmptyPollGate';
 import { CdpService } from './cdpService';
 
 /** Approval button information */
@@ -282,10 +283,8 @@ export class ApprovalDetector {
     private lastDetectedKey: string | null = null;
     /** Full ApprovalInfo from the last detection (used for clicking) */
     private lastDetectedInfo: ApprovalInfo | null = null;
-    /** Number of consecutive polls without detecting buttons */
-    private emptyPollCount: number = 0;
-    /** Number of consecutive empty polls required before resetting state */
-    private static readonly REQUIRED_EMPTY_POLLS = 3;
+    /** Gate for empty polls before reset */
+    private emptyPollGate = new ConsecutiveEmptyPollGate(3);
 
     constructor(options: ApprovalDetectorOptions) {
         this.cdpService = options.cdpService;
@@ -302,7 +301,7 @@ export class ApprovalDetector {
         this.isRunning = true;
         this.lastDetectedKey = null;
         this.lastDetectedInfo = null;
-        this.emptyPollCount = 0;
+        this.emptyPollGate.reset();
         this.schedulePoll();
     }
 
@@ -358,7 +357,7 @@ export class ApprovalDetector {
             const info: ApprovalInfo | null = result?.result?.value ?? null;
 
             if (info) {
-                this.emptyPollCount = 0;
+                this.emptyPollGate.recordDetection();
                 // Duplicate prevention: use approveText + description combination as key
                 const key = `${info.approveText}::${info.description}`;
                 if (key !== this.lastDetectedKey) {
@@ -367,8 +366,7 @@ export class ApprovalDetector {
                     this.onApprovalRequired(info);
                 }
             } else {
-                this.emptyPollCount++;
-                if (this.emptyPollCount >= ApprovalDetector.REQUIRED_EMPTY_POLLS) {
+                if (this.emptyPollGate.recordEmptyPoll()) {
                     // Reset when buttons disappear for consecutive polls
                     const wasDetected = this.lastDetectedKey !== null;
                     this.lastDetectedKey = null;

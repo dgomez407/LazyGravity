@@ -397,6 +397,27 @@ describe('assistantDomExtractor', () => {
             expect(result.citations).toEqual(['file:///C:/Workspace/test.py']);
         });
 
+        it('extracts fileChangesTexts correctly from a file-changes block', () => {
+            const html = `
+                <div class="message" data-message-role="assistant">
+                    <div class="file-changes-block">
+                        <pre><code>Some file changes text</code></pre>
+                    </div>
+                </div>
+            `;
+            document.body.innerHTML = html;
+
+            const script = extractAssistantSegmentsPayloadScript();
+            const scriptEl = document.createElement('script');
+            scriptEl.textContent = `window.__testPayload = ${script};`;
+            document.body.appendChild(scriptEl);
+            const payload = (window as any).__testPayload;
+
+            const result = classifyAssistantSegments(payload);
+            
+            expect(result.fileChangesTexts).toEqual(['Some file changes text']);
+        });
+
         it('extracts file names from the sticky footer .bottom-full .cursor-pointer', () => {
             const html = `
                 <div class="antigravity-agent-side-panel">

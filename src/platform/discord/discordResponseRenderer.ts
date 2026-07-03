@@ -70,7 +70,7 @@ export function renderDiscordResponse(result: ClassifyResult): MessageCreateOpti
         const chunks = chunkText(planText, 4000);
         for (let i = 0; i < chunks.length && embeds.length < 10; i++) {
             const embed = new EmbedBuilder()
-                .setTitle(i === 0 ? 'Plan' : undefined)
+                .setTitle(i === 0 ? 'Plan' : null)
                 .setColor(0x5865f2) // Blurple
                 .setDescription(chunks[i]);
             embeds.push(embed);

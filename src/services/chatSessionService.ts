@@ -325,7 +325,7 @@ function buildActivateChatByTitleScript(title: string): string {
  * Build a script that opens Past Conversations and selects a conversation by title.
  * This path is required for older chats that are not visible in the current side panel.
  */
-function buildActivateViaPastConversationsScript(title: string): string {
+export function buildActivateViaPastConversationsScript(title: string): string {
     const safeTitle = JSON.stringify(title);
     return `(() => {
         const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -344,9 +344,9 @@ function buildActivateViaPastConversationsScript(title: string): string {
 
         const isVisible = (el) => !!el && el instanceof HTMLElement && el.offsetParent !== null;
         const asArray = (nodeList) => Array.from(nodeList || []);
-        const getLabelText = (el) => {
-            if (!el || !(el instanceof Element)) return '';
-            const parts = [
+        const getLabelParts = (el) => {
+            if (!el || !(el instanceof Element)) return [];
+            return [
                 el.textContent || '',
                 el.getAttribute('aria-label') || '',
                 el.getAttribute('title') || '',
@@ -354,7 +354,18 @@ function buildActivateViaPastConversationsScript(title: string): string {
                 el.getAttribute('data-tooltip-content') || '',
                 el.getAttribute('data-testid') || '',
             ];
-            return parts.filter(Boolean).join(' ');
+        };
+        const getLabelText = (el) => getLabelParts(el).filter(Boolean).join(' ');
+        const resolveMatchedTitle = (el) => {
+            const parts = getLabelParts(el);
+            for (const part of parts) {
+                if (!part) continue;
+                if (normalize(part) === wanted || (wantedLoose && normalizeLoose(part) === wantedLoose)) {
+                    return wantedRaw;
+                }
+            }
+            const visible = (parts[0] || '').trim();
+            return visible || null;
         };
         const getClickable = (el) => {
             if (!el || !(el instanceof Element)) return null;
@@ -575,7 +586,7 @@ function buildActivateViaPastConversationsScript(title: string): string {
                 ok: true,
                 x: Math.round(rect.x + rect.width / 2),
                 y: Math.round(rect.y + rect.height / 2),
-                matchedTitle: wantedRaw
+                matchedTitle: resolveMatchedTitle(selectedOption)
             };
         })();
     })()`;

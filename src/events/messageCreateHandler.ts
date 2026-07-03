@@ -322,19 +322,26 @@ export function createMessageCreateHandler(deps: MessageCreateHandlerDeps) {
                 }
             }
 
-            // Fetch and append text attachments
-            for (const textAtt of textAttachments) {
-                try {
-                    const res = await fetch(textAtt.url);
-                    if (res.ok) {
-                        const content = await res.text();
-                        promptText += `\n\n[Attached File: ${textAtt.name}]\n\`\`\`\n${content}\n\`\`\``;
-                    } else {
-                        logger.warn(`[MessageCreate] Non-ok status fetching text attachment ${textAtt.name}: ${res.status}`);
+            // Fetch and append text attachments in parallel with a small concurrency cap
+            const CONCURRENCY_LIMIT = 3;
+            for (let i = 0; i < textAttachments.length; i += CONCURRENCY_LIMIT) {
+                const chunk = textAttachments.slice(i, i + CONCURRENCY_LIMIT);
+                const results = await Promise.all(chunk.map(async (textAtt) => {
+                    try {
+                        const res = await fetch(textAtt.url);
+                        if (res.ok) {
+                            const content = await res.text();
+                            return `\n\n[Attached File: ${textAtt.name}]\n\`\`\`\n${content}\n\`\`\``;
+                        } else {
+                            logger.warn(`[MessageCreate] Non-ok status fetching text attachment ${textAtt.name}: ${res.status}`);
+                            return '';
+                        }
+                    } catch (e) {
+                        logger.warn(`[MessageCreate] Failed to fetch text attachment ${textAtt.name}:`, e);
+                        return '';
                     }
-                } catch (e) {
-                    logger.warn(`[MessageCreate] Failed to fetch text attachment ${textAtt.name}:`, e);
-                }
+                }));
+                promptText += results.join('');
             }
 
             const inboundImages = await downloadInboundImageAttachments(message);

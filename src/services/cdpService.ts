@@ -747,7 +747,8 @@ export class CdpService extends EventEmitter {
 
             // If we only have the project name to go on, make sure it's a discrete boundary in the URL path
             // e.g. "folder=.../test" or "workspace=.../test". We prevent false positives like "latest" matching "test".
-            const projectBoundaryRegex = new RegExp(`[=/]${projectName.toLowerCase()}(?:$|&|\\?)`);
+            const safeProjectName = projectName.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const projectBoundaryRegex = new RegExp(`[=/]${safeProjectName}(?:$|&|\\?)`);
             if (projectBoundaryRegex.test(pageUrl)) {
                 this.currentWorkspaceName = projectName;
                 logger.debug(`[CdpService] URL parameter match success: "${projectName}" (boundary regex)`);

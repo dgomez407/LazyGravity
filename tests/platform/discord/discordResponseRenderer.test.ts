@@ -142,4 +142,52 @@ describe('discordResponseRenderer', () => {
         // 50 files * ~30 chars each = 1500 chars -> should be split into 2 fields
         expect((fileEmbed as any).data.fields!.length).toBeGreaterThan(1);
     });
+
+    it('chunks very long plan cards into multiple embeds', () => {
+        const longPlan = 'A'.repeat(5000);
+        const result: ClassifyResult = {
+            finalOutputText: 'Plan follows.',
+            activityLines: [],
+            feedback: [],
+            planCards: [longPlan],
+            actionButtons: [],
+            fileChanges: [],
+            citations: [],
+            fileChangesTexts: [],
+            citedFiles: [],
+            diagnostics: { source: 'dom-structured', segmentCounts: {}, allFingerprints: [], totalSegments: 1 },
+        };
+
+        const output = renderDiscordResponse(result);
+        const planEmbeds = output.embeds!.filter(e => (e as any).data.color === 0x5865f2);
+        expect(planEmbeds.length).toBe(2);
+        expect((planEmbeds[0] as any).data.title).toBe('Plan');
+        expect((planEmbeds[1] as any).data.title).toBeUndefined(); // Second part has no title
+        expect((planEmbeds[0] as any).data.description?.length).toBeLessThanOrEqual(4000);
+    });
+
+    it('handles a single oversized file change path', () => {
+        const longPath = 'src/' + 'a/'.repeat(500) + 'file.ts'; // ~1000+ chars
+        const result: ClassifyResult = {
+            finalOutputText: 'Long file.',
+            activityLines: [],
+            feedback: [],
+            planCards: [],
+            actionButtons: [],
+            fileChanges: [
+                { path: longPath, type: 'Modified' },
+            ],
+            citations: [],
+            fileChangesTexts: [],
+            citedFiles: [],
+            diagnostics: { source: 'dom-structured', segmentCounts: {}, allFingerprints: [], totalSegments: 1 },
+        };
+
+        const output = renderDiscordResponse(result);
+        const fileEmbed = output.embeds!.find(e => (e as any).data.title === 'File Changes');
+        expect(fileEmbed).toBeDefined();
+        // The oversized line should be split across multiple fields
+        expect((fileEmbed as any).data.fields!.length).toBeGreaterThan(1);
+        expect((fileEmbed as any).data.fields![0].value.length).toBeLessThanOrEqual(1000);
+    });
 });

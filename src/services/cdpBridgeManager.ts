@@ -796,6 +796,7 @@ export function ensureQuestionDetector(
         },
     });
 
+    detector.setProjectName(projectName);
     detector.start();
     bridge.pool.registerQuestionDetector(projectName, detector, accountName);
     logger.debug(`[QuestionDetector:${projectName}] Started question detection`);

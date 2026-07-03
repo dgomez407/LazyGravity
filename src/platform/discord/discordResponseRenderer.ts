@@ -68,11 +68,13 @@ export function renderDiscordResponse(result: ClassifyResult): MessageCreateOpti
     if (result.planCards && result.planCards.length > 0) {
         const planText = result.planCards.join('\n\n');
         const chunks = chunkText(planText, 4000);
-        const embed = new EmbedBuilder()
-            .setTitle('Plan')
-            .setColor(0x5865f2) // Blurple
-            .setDescription(chunks[0]);
-        embeds.push(embed);
+        for (let i = 0; i < chunks.length && embeds.length < 10; i++) {
+            const embed = new EmbedBuilder()
+                .setTitle(i === 0 ? 'Plan' : undefined)
+                .setColor(0x5865f2) // Blurple
+                .setDescription(chunks[i]);
+            embeds.push(embed);
+        }
     }
 
     // 3. File Changes
@@ -87,10 +89,24 @@ export function renderDiscordResponse(result: ClassifyResult): MessageCreateOpti
         
         for (const file of result.fileChanges) {
             const line = `- \`${file.path}\` (${file.type})\n`;
-            if (currentFieldVal.length + line.length > 1000) {
-                embed.addFields({ name: fieldCount === 0 ? 'Files' : '...', value: currentFieldVal });
+            if (line.length > 1000) {
+                if (currentFieldVal) {
+                    embed.addFields({ name: fieldCount === 0 ? 'Files' : '...', value: currentFieldVal });
+                    currentFieldVal = '';
+                    fieldCount++;
+                }
+                const splitLine = chunkText(line, 1000);
+                for (const sl of splitLine) {
+                    embed.addFields({ name: fieldCount === 0 ? 'Files' : '...', value: sl || '-' });
+                    fieldCount++;
+                    if (fieldCount >= 24) break;
+                }
+            } else if (currentFieldVal.length + line.length > 1000) {
+                if (currentFieldVal) {
+                    embed.addFields({ name: fieldCount === 0 ? 'Files' : '...', value: currentFieldVal });
+                    fieldCount++;
+                }
                 currentFieldVal = line;
-                fieldCount++;
                 if (fieldCount >= 24) break; // Leave one just in case
             } else {
                 currentFieldVal += line;
@@ -109,7 +125,7 @@ export function renderDiscordResponse(result: ClassifyResult): MessageCreateOpti
         for (let i = 0; i < result.actionButtons.length && i < 5; i++) { // Max 5 buttons per row
             const btnText = result.actionButtons[i];
             const btn = new ButtonBuilder()
-                .setCustomId(`action_btn_${btnText.toLowerCase().replace(/\\s+/g, '_')}`)
+                .setCustomId(`action_btn_${btnText.toLowerCase().replace(/\s+/g, '_')}`)
                 .setLabel(btnText)
                 .setStyle(
                     btnText.toLowerCase() === 'proceed' || btnText.toLowerCase() === 'open' 

@@ -90,8 +90,6 @@ export class QuestionDetector extends EventEmitter {
                     let submitBtn = null;
                     
                     for (const container of containers) {
-                        const hasList = container.querySelector('ul, [role="listbox"], [role="radiogroup"]') !== null;
-                        
                         const buttons = Array.from(container.querySelectorAll('button'));
                         let possibleSubmitBtn = null;
                         for (const btn of buttons) {
@@ -102,12 +100,12 @@ export class QuestionDetector extends EventEmitter {
                             }
                         }
                         
-                        if (hasList && possibleSubmitBtn) {
-                            const listElement = container.querySelector('ul, [role="listbox"], [role="radiogroup"]');
-                            const items = Array.from(listElement.querySelectorAll('li, [role="radio"], [role="option"], .cursor-pointer'));
+                        if (possibleSubmitBtn) {
+                            const items = Array.from(container.querySelectorAll('li, label, a, [role="radio"], [role="option"], [class*="cursor-pointer"]'))
+                                .filter(el => el.tagName !== 'BUTTON' && !el.closest('button'));
                             
                             if (items.length > 1) {
-                                targetList = listElement;
+                                targetList = container;
                                 submitBtn = possibleSubmitBtn;
                                 break;
                             }
@@ -116,7 +114,8 @@ export class QuestionDetector extends EventEmitter {
 
                     if (!targetList || !submitBtn) return { found: false };
 
-                    const items = Array.from(targetList.querySelectorAll('li, [role="radio"], [role="option"], .cursor-pointer'));
+                    const items = Array.from(targetList.querySelectorAll('li, label, a, [role="radio"], [role="option"], [class*="cursor-pointer"]'))
+                        .filter(el => el.tagName !== 'BUTTON' && !el.closest('button'));
                     if (items.length <= ${index}) return { found: false };
                     
                     const targetOption = items[${index}];

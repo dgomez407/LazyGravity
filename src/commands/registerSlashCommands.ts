@@ -133,7 +133,12 @@ const projectCommand = new SlashCommandBuilder()
 /** /new command definition (formerly /chat new, made into a standalone command) */
 const newCommand = new SlashCommandBuilder()
     .setName('new')
-    .setDescription(t('Start a new chat session in the current project'));
+    .setDescription(t('Start a new chat session in the current project'))
+    .addStringOption(option =>
+        option.setName('name')
+            .setDescription(t('Name of the new chat session'))
+            .setRequired(false)
+    );
 
 /** /chat command definition (merged status + list) */
 const chatCommand = new SlashCommandBuilder()
@@ -219,6 +224,17 @@ const artifactsCommand = new SlashCommandBuilder()
     .setName('artifacts')
     .setDescription(t('Browse and view generated artifacts from the active session'));
 
+/** /open command definition */
+const openCommand = new SlashCommandBuilder()
+    .setName('open')
+    .setDescription(t('Open and read a file from the workspace'))
+    .addStringOption((option) =>
+        option
+            .setName('filepath')
+            .setDescription(t('Absolute or relative path to the file'))
+            .setRequired(true)
+    );
+
 /** Array of commands to register */
 export const slashCommands = [
     helpCommand,
@@ -241,6 +257,7 @@ export const slashCommands = [
     pingCommand,
     logsCommand,
     artifactsCommand,
+    openCommand,
 ];
 
 /**

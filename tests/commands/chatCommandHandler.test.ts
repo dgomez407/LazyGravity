@@ -20,7 +20,8 @@ describe('ChatCommandHandler', () => {
 
     beforeEach(() => {
         mockService = {
-            startNewChat: jest.fn(),
+            startNewChat: jest.fn().mockResolvedValue({ ok: true }),
+            renameCurrentChatInUI: jest.fn().mockResolvedValue({ ok: true }),
             getCurrentSessionInfo: jest.fn(),
         } as any;
 
@@ -142,6 +143,7 @@ describe('ChatCommandHandler', () => {
                 channel: { type: 0, parentId: 'cat-1' },
                 channelId: 'ch-1',
                 user: { id: 'user-1' },
+                options: { getString: jest.fn().mockReturnValue(null) },
                 editReply: jest.fn().mockResolvedValue(undefined),
             };
 
@@ -192,6 +194,7 @@ describe('ChatCommandHandler', () => {
                 channel: { type: 0, parentId: 'cat-1' },
                 channelId: 'ch-1',
                 user: { id: 'user-1' },
+                options: { getString: jest.fn().mockReturnValue(null) },
                 editReply: jest.fn().mockResolvedValue(undefined),
             };
 
@@ -220,6 +223,7 @@ describe('ChatCommandHandler', () => {
                 channel: { type: 0, parentId: 'cat-1' },
                 channelId: 'ch-1',
                 user: { id: 'user-1' },
+                options: { getString: jest.fn().mockReturnValue(null) },
                 editReply: jest.fn().mockResolvedValue(undefined),
             };
 
@@ -261,6 +265,7 @@ describe('ChatCommandHandler', () => {
                 channel: { type: 0, parentId: null },
                 channelId: 'ch-1',
                 user: { id: 'user-1' },
+                options: { getString: jest.fn().mockReturnValue(null) },
                 editReply: jest.fn().mockResolvedValue(undefined),
             };
 

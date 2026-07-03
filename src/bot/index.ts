@@ -13,6 +13,8 @@ import {
 } from 'discord.js';
 import Database from 'better-sqlite3';
 import fs from 'fs';
+import { execFile } from 'child_process';
+import path from 'path';
 
 import { wrapDiscordChannel } from '../platform/discord/wrappers';
 import type { PlatformType } from '../platform/types';
@@ -55,7 +57,8 @@ import { CdpService } from '../services/cdpService';
 import { ChatSessionService } from '../services/chatSessionService';
 import { ResponseMonitor, RESPONSE_SELECTORS, captureResponseMonitorBaseline } from '../services/responseMonitor';
 import { ensureAntigravityRunning, startAntigravity, stopAntigravity } from '../services/antigravityLauncher';
-import { getAntigravityCdpHint } from '../utils/pathUtils';
+import { getAntigravityCdpHint, getAntigravityCliPath } from '../utils/pathUtils';
+import { fileOpenCache } from '../utils/fileOpenCache';
 import { AutoAcceptService } from '../services/autoAcceptService';
 import { PromptDispatcher } from '../services/promptDispatcher';
 import {
@@ -65,17 +68,21 @@ import {
     ensureErrorPopupDetector,
     ensurePlanningDetector,
     ensureRunCommandDetector,
+    ensureQuestionDetector,
     getCurrentCdp,
     initCdpBridge,
     parseApprovalCustomId,
     parseErrorPopupCustomId,
     parsePlanningCustomId,
+    buildFileChangeCustomId,
+    parseFileChangeCustomId,
     parseRunCommandCustomId,
     registerApprovalSessionChannel,
     registerApprovalWorkspaceChannel,
 } from '../services/cdpBridgeManager';
 import { buildModeModelLines, fitForSingleEmbedDescription, splitForEmbedDescription } from '../utils/streamMessageFormatter';
 import { formatForDiscord, splitOutputAndLogs } from '../utils/discordFormatter';
+import { renderDiscordResponse } from '../platform/discord/discordResponseRenderer';
 import { ProcessLogBuffer } from '../utils/processLogBuffer';
 import {
     buildPromptWithAttachmentUrls,
@@ -113,8 +120,11 @@ import { createPlanningButtonAction } from '../handlers/planningButtonAction';
 import { createErrorPopupButtonAction } from '../handlers/errorPopupButtonAction';
 import { createRunCommandButtonAction } from '../handlers/runCommandButtonAction';
 import { createModelButtonAction } from '../handlers/modelButtonAction';
-import { createAutoAcceptButtonAction } from '../handlers/autoAcceptButtonAction';
+import { createQuestionSelectAction } from '../handlers/questionSelectAction';
 import { createTemplateButtonAction } from '../handlers/templateButtonAction';
+import { createFileChangeButtonAction } from '../handlers/fileChangeButtonAction';
+import { createAutoAcceptButtonAction } from '../handlers/autoAcceptButtonAction';
+import { createGenericActionButtonAction } from '../handlers/genericActionButtonAction';
 import { createModeSelectAction } from '../handlers/modeSelectAction';
 import { createAccountSelectAction } from '../handlers/accountSelectAction';
 import { selectTelegramStartupChatId } from './telegramStartupTarget';
@@ -187,8 +197,10 @@ export function createSerialTaskQueueForTest(queueName: string, traceId: string)
     };
 }
 
+// Shared fileOpenCache is imported from utils/fileOpenCache
+
 /**
- * Send a Discord message (prompt) to Antigravity, wait for the response, and relay it back to Discord
+ * Send a user's prompt to Antigravity and monitor generation.
  *
  * Message strategy:
  *   - Send new messages per phase instead of editing, to preserve history
@@ -212,6 +224,7 @@ async function sendPromptToAntigravity(
         onFullCompletion?: () => void;
         extractionMode?: ExtractionMode;
         responseTimeoutMs?: number;
+        resumeOnly?: boolean;
     }
 
 ): Promise<void> {
@@ -464,6 +477,7 @@ async function sendPromptToAntigravity(
             source?: string;
             expectedVersion?: number;
             skipWhenFinalized?: boolean;
+            components?: any[]; // using any[] to avoid missing type imports like ActionRowBuilder
         },
     ): Promise<void> => enqueueResponse(async () => {
         if (opts?.skipWhenFinalized && isFinalized) return;
@@ -480,16 +494,21 @@ async function sendPromptToAntigravity(
             lastLiveResponseKey = renderKey;
 
             for (let i = 0; i < plainChunks.length; i++) {
+                const messageOpts: any = { content: plainChunks[i] };
+                if (i === plainChunks.length - 1 && opts?.components?.length) {
+                    messageOpts.components = opts.components;
+                }
+                
                 if (!liveResponseMessages[i]) {
-                    liveResponseMessages[i] = await channel.send({ content: plainChunks[i] }).catch((error: unknown) => {
+                    liveResponseMessages[i] = await channel.send(messageOpts).catch((error: unknown) => {
                         logDeliveryError('liveResponse/plain/send', error);
                         return null;
                     });
                     continue;
                 }
-                await liveResponseMessages[i].edit({ content: plainChunks[i] }).catch(async (error: unknown) => {
+                await liveResponseMessages[i].edit(messageOpts).catch(async (error: unknown) => {
                     logDeliveryError('liveResponse/plain/edit', error);
-                    liveResponseMessages[i] = await channel.send({ content: plainChunks[i] }).catch((sendError: unknown) => {
+                    liveResponseMessages[i] = await channel.send(messageOpts).catch((sendError: unknown) => {
                         logDeliveryError('liveResponse/plain/resend', sendError);
                         return null;
                     });
@@ -519,16 +538,24 @@ async function sendPromptToAntigravity(
                 .setTimestamp();
 
             if (!liveResponseMessages[i]) {
-                liveResponseMessages[i] = await channel.send({ embeds: [embed] }).catch((error: unknown) => {
+                const messageOpts: any = { embeds: [embed] };
+                if (i === descriptions.length - 1 && opts?.components?.length) {
+                    messageOpts.components = opts.components;
+                }
+                liveResponseMessages[i] = await channel.send(messageOpts).catch((error: unknown) => {
                     logDeliveryError('liveResponse/embed/send', error);
                     return null;
                 });
                 continue;
             }
 
-            await liveResponseMessages[i].edit({ embeds: [embed] }).catch(async (error: unknown) => {
+            const messageOpts: any = { embeds: [embed] };
+            if (i === descriptions.length - 1 && opts?.components?.length) {
+                messageOpts.components = opts.components;
+            }
+            await liveResponseMessages[i].edit(messageOpts).catch(async (error: unknown) => {
                 logDeliveryError('liveResponse/embed/edit', error);
-                liveResponseMessages[i] = await channel.send({ embeds: [embed] }).catch((sendError: unknown) => {
+                liveResponseMessages[i] = await channel.send(messageOpts).catch((sendError: unknown) => {
                     logDeliveryError('liveResponse/embed/resend', sendError);
                     return null;
                 });
@@ -635,23 +662,25 @@ async function sendPromptToAntigravity(
 
         logger.prompt(prompt);
 
-        let injectResult;
-        if (inboundImages.length > 0) {
-            injectResult = await cdp.injectMessageWithImageFiles(
-                prompt,
-                inboundImages.map((image) => image.localPath),
-            );
-
-            if (!injectResult.ok) {
-                await sendEmbed(
-                    t('🖼️ Attached image fallback'),
-                    t('Failed to attach image directly, resending via URL reference.'),
-                    PHASE_COLORS.thinking,
+        let injectResult: any = { ok: true };
+        if (!options?.resumeOnly) {
+            if (inboundImages.length > 0) {
+                injectResult = await cdp.injectMessageWithImageFiles(
+                    prompt,
+                    inboundImages.map((image) => image.localPath),
                 );
-                injectResult = await cdp.injectMessage(buildPromptWithAttachmentUrls(prompt, inboundImages));
+
+                if (!injectResult.ok) {
+                    await sendEmbed(
+                        t('🖼️ Attached image fallback'),
+                        t('Failed to attach image directly, resending via URL reference.'),
+                        PHASE_COLORS.thinking,
+                    );
+                    injectResult = await cdp.injectMessage(buildPromptWithAttachmentUrls(prompt, inboundImages));
+                }
+            } else {
+                injectResult = await cdp.injectMessage(prompt);
             }
-        } else {
-            injectResult = await cdp.injectMessage(prompt);
         }
 
         if (!injectResult.ok) {
@@ -719,7 +748,7 @@ async function sendPromptToAntigravity(
                 }
             },
 
-            onComplete: async (finalText) => {
+            onComplete: async (finalText, citedFiles, fileChanges) => {
                 isFinalized = true;
 
                 try {
@@ -826,29 +855,9 @@ async function sendPromptToAntigravity(
 
                     liveResponseUpdateVersion += 1;
                     const responseVersion = liveResponseUpdateVersion;
-                    if (finalOutputText && finalOutputText.trim().length > 0) {
-                        await upsertLiveResponseEmbeds(
-                            `${PHASE_ICONS.complete} Final Output`,
-                            finalOutputText,
-                            PHASE_COLORS.complete,
-                            t(`⏱️ Time: ${elapsed}s | Complete`),
-                            {
-                                source: 'complete',
-                                expectedVersion: responseVersion,
-                            },
-                        );
-                    } else {
-                        await upsertLiveResponseEmbeds(
-                            `${PHASE_ICONS.complete} Complete`,
-                            t('Failed to extract response. Use `/screenshot` to verify.'),
-                            PHASE_COLORS.complete,
-                            t(`⏱️ Time: ${elapsed}s | Complete`),
-                            {
-                                source: 'complete',
-                                expectedVersion: responseVersion,
-                            },
-                        );
-                    }
+                    
+                    const components: any[] = [];
+                    if (!citedFiles) citedFiles = [];
 
                     if (options && message.guild) {
                         try {
@@ -871,7 +880,12 @@ async function sendPromptToAntigravity(
 
                                 // Persist conversation_id for artifact picker resolution
                                 if (options.artifactService) {
-                                    const convId = options.artifactService.findConversationByTitle(sessionInfo.title);
+                                    const session = options.chatSessionRepo.findByChannelId(message.channelId);
+                                    let workspaceDirName: string | undefined;
+                                    if (session && session.workspacePath) {
+                                        workspaceDirName = bridge.pool.extractProjectName(session.workspacePath);
+                                    }
+                                    const convId = options.artifactService.findConversationByTitle(sessionInfo.title, workspaceDirName);
                                     if (convId) {
                                         options.chatSessionRepo.setConversationId(message.channelId, convId);
                                     }
@@ -880,6 +894,123 @@ async function sendPromptToAntigravity(
                         } catch (e) {
                             logger.error('[Rename] Failed to get title from Antigravity and rename:', e);
                         }
+                    }
+
+                    if (citedFiles && citedFiles.length > 0) {
+                        // Strip trailing punctuation and deduplicate
+                        let uniqueFiles = Array.from(new Set(citedFiles.map(f => {
+                            let clean = f.trim();
+                            while (clean.match(/[.,;:!?]$/)) {
+                                clean = clean.slice(0, -1);
+                            }
+                            return clean;
+                        })));
+                        // Filter out obviously bad paths
+                        uniqueFiles = uniqueFiles.filter(f => f.length > 0 && f !== 'unknown');
+                        
+                        const row = new ActionRowBuilder();
+                        // Max 5 buttons per row in Discord
+                        for (let i = 0; i < Math.min(uniqueFiles.length, 5); i++) {
+                            let fileUrl = uniqueFiles[i];
+                            
+                            if (!fileUrl.startsWith('file:///') && !path.isAbsolute(fileUrl)) {
+                                const wsPath = cdp.getCurrentWorkspacePath();
+                                if (wsPath) {
+                                    fileUrl = `file:///${path.resolve(wsPath, fileUrl).replace(/\\/g, '/')}`;
+                                }
+                            }
+                            
+                            // Verify the file actually exists
+                            const fsPath = fileUrl.replace(/^file:\/\/\//, '');
+                            if (!fs.existsSync(fsPath)) {
+                                continue;
+                            }
+
+                            let displayName = fileUrl;
+                            if (displayName.startsWith('file:///')) {
+                                const parts = displayName.split('/');
+                                displayName = parts[parts.length - 1];
+                            }
+                            const hashId = Math.random().toString(36).substring(2, 10);
+                            fileOpenCache.set(hashId, fileUrl);
+                            
+                            row.addComponents(
+                                new ButtonBuilder()
+                                    .setCustomId(`file_open:${hashId}`)
+                                    .setLabel(`Open ${displayName.substring(0, 20)}`)
+                                    .setStyle(ButtonStyle.Primary)
+                            );
+                        }
+                        if (row.components.length > 0) {
+                            components.push(row);
+                        }
+                    }
+
+                    if (fileChanges && fileChanges.length > 0) {
+                        // The extracted text is the toolbar title, e.g. "1 File With Changes"
+                        const widgetTitle = fileChanges[fileChanges.length - 1] || 'Files With Changes';
+                        const fileChangesRow = new ActionRowBuilder().addComponents(
+                            new ButtonBuilder()
+                                .setCustomId(buildFileChangeCustomId('reject', cdp.getCurrentWorkspaceName() || 'unknown', message.channelId))
+                                .setLabel(`Reject all (${widgetTitle})`)
+                                .setStyle(ButtonStyle.Danger),
+                            new ButtonBuilder()
+                                .setCustomId(buildFileChangeCustomId('accept', cdp.getCurrentWorkspaceName() || 'unknown', message.channelId))
+                                .setLabel('Accept all')
+                                .setStyle(ButtonStyle.Success)
+                        );
+                        components.push(fileChangesRow);
+                    }
+
+                    const classified = monitor.getLastClassified();
+                    if (options?.extractionMode === 'structured' && classified && outputFormat !== 'plain') {
+                        const messageOptions = renderDiscordResponse(classified);
+                        for (const msg of liveResponseMessages) {
+                            if (msg) await msg.delete().catch(() => {});
+                        }
+                        liveResponseMessages.length = 0;
+                        
+                        if (components.length > 0) {
+                            if (!messageOptions.components) messageOptions.components = [];
+                            messageOptions.components = [...(messageOptions.components || []), ...components];
+                        }
+
+                        if (messageOptions.embeds && messageOptions.embeds.length > 0) {
+                            const lastEmbed = messageOptions.embeds[messageOptions.embeds.length - 1];
+                            if (lastEmbed && typeof (lastEmbed as any).setFooter === 'function') {
+                                (lastEmbed as any).setFooter({ text: t(`⏱️ Time: ${elapsed}s | Complete`) });
+                            }
+                        }
+                        
+                        if (channel) {
+                            await channel.send(messageOptions).catch((error: unknown) => {
+                                logDeliveryError('renderDiscordResponse/send', error);
+                            });
+                        }
+                    } else if (finalOutputText && finalOutputText.trim().length > 0) {
+                        await upsertLiveResponseEmbeds(
+                            `${PHASE_ICONS.complete} Final Output`,
+                            finalOutputText,
+                            PHASE_COLORS.complete,
+                            t(`⏱️ Time: ${elapsed}s | Complete`),
+                            {
+                                source: 'complete',
+                                expectedVersion: responseVersion,
+                                components: components.length > 0 ? components : undefined,
+                            },
+                        );
+                    } else {
+                        await upsertLiveResponseEmbeds(
+                            `${PHASE_ICONS.complete} Complete`,
+                            t('Failed to extract response. Use `/screenshot` to verify.'),
+                            PHASE_COLORS.complete,
+                            t(`⏱️ Time: ${elapsed}s | Complete`),
+                            {
+                                source: 'complete',
+                                expectedVersion: responseVersion,
+                                components: components.length > 0 ? components : undefined,
+                            },
+                        );
                     }
 
                     await sendGeneratedImages(finalOutputText || '');
@@ -1210,6 +1341,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         } catch (error) {
             logger.warn('Failed to send startup dashboard embed:', error);
         }
+
     });
 
     // [Discord Interactions API] Slash command interaction handler
@@ -1223,6 +1355,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         wsHandler,
         chatHandler,
         client,
+        promptDispatcher,
         sendModeUI,
         sendModelsUI,
         sendAutoAcceptUI,
@@ -1230,6 +1363,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         parseApprovalCustomId,
         parseErrorPopupCustomId,
         parsePlanningCustomId,
+        parseFileChangeCustomId,
         parseRunCommandCustomId,
         joinHandler,
         userPrefRepo,
@@ -1254,6 +1388,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             accountPrefRepoArg,
             channelPrefRepoArg,
             antigravityAccountsArg,
+            chatSessionRepoArg,
         ) => handleSlashInteraction(
             interaction,
             handler,
@@ -1273,7 +1408,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             accountPrefRepoArg,
             channelPrefRepoArg,
             antigravityAccountsArg,
-            chatSessionRepo,
+            chatSessionRepoArg,
             artifactService,
         ),
         handleTemplateUse: async (interaction, templateId) => {
@@ -1322,6 +1457,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     ensureErrorPopupDetector(bridge, cdp, projectName, selectedAccount);
                     ensurePlanningDetector(bridge, cdp, projectName, selectedAccount);
                     ensureRunCommandDetector(bridge, cdp, projectName, selectedAccount);
+                    ensureQuestionDetector(bridge, cdp, projectName, selectedAccount);
                 } catch (e: any) {
                     await interaction.followUp({
                         content: `Failed to connect to workspace: ${e.message}`,
@@ -1488,10 +1624,12 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         : binding.workspacePath;
                 },
             });
+            const questionSelectAction = createQuestionSelectAction({ bridge, wsHandler });
             const telegramSelectHandler = createPlatformSelectHandler({
                 actions: [
                     modeSelectAction,
                     accountSelectAction,
+                    questionSelectAction,
                 ],
             });
             // Composite handler that routes to the right handler
@@ -1510,7 +1648,11 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     }, interaction);
                     return;
                 }
-                if (interaction.customId === 'mode_select' || interaction.customId === 'account_select') {
+                if (
+                    interaction.customId === 'mode_select' ||
+                    interaction.customId === 'account_select' ||
+                    interaction.customId.startsWith('question_select_action')
+                ) {
                     await telegramSelectHandler(interaction);
                     return;
                 }
@@ -1526,10 +1668,10 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
             const telegramButtonHandler = createPlatformButtonHandler({
                 actions: [
-                    createApprovalButtonAction({ bridge }),
-                    createPlanningButtonAction({ bridge }),
-                    createErrorPopupButtonAction({ bridge }),
-                    createRunCommandButtonAction({ bridge }),
+                    createApprovalButtonAction({ bridge, wsHandler }),
+                    createPlanningButtonAction({ bridge, wsHandler }),
+                    createErrorPopupButtonAction({ bridge, wsHandler }),
+                    createRunCommandButtonAction({ bridge, wsHandler }),
                     createModelButtonAction({
                         bridge,
                         fetchQuota: () => bridge.quota.fetchQuota(),
@@ -1574,6 +1716,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     }),
                     createAutoAcceptButtonAction({ autoAcceptService: bridge.autoAccept }),
                     createTemplateButtonAction({ bridge, templateRepo }),
+                    createFileChangeButtonAction({ bridge, wsHandler }),
+                    createGenericActionButtonAction({ bridge }),
                 ],
             });
 
@@ -2289,6 +2433,58 @@ export async function handleSlashInteraction(
                 : `\`\`\`\n${formatted.slice(0, MAX_CONTENT)}\n\`\`\`\n(truncated — showing ${MAX_CONTENT} chars of ${formatted.length})`;
 
             await interaction.editReply({ content: codeBlock });
+            break;
+        }
+
+        case 'open': {
+            const filepath = interaction.options.getString('filepath', true);
+            let resolvedPath = filepath;
+            if (filepath.startsWith('file:///')) {
+                // Windows fix: remove leading slash if it's file:///C:/...
+                let rawPath = filepath.replace('file:///', '');
+                if (process.platform === 'win32' && rawPath.startsWith('/')) {
+                    rawPath = rawPath.substring(1);
+                }
+                resolvedPath = path.resolve(rawPath);
+            } else if (!path.isAbsolute(filepath)) {
+                // Try resolving as an artifact first
+                if (chatSessionRepo && artifactService) {
+                    const session = chatSessionRepo.findByChannelId(interaction.channelId);
+                    if (session && session.conversationId) {
+                        const possibleArtifact = artifactService.getArtifactPath(session.conversationId, filepath);
+                        if (fs.existsSync(possibleArtifact)) {
+                            resolvedPath = possibleArtifact;
+                        }
+                    }
+                }
+                
+                // If still not absolute (meaning artifact not found), try workspace
+                if (!path.isAbsolute(resolvedPath)) {
+                    // Try to resolve against workspace
+                    const cdp = await ensureChannelCdp();
+                    if (cdp) {
+                        const wsPath = cdp.getCurrentWorkspacePath();
+                        if (wsPath) {
+                            resolvedPath = path.join(wsPath, filepath);
+                        }
+                    } else {
+                        resolvedPath = path.resolve(filepath);
+                    }
+                }
+            }
+
+            try {
+                execFile(getAntigravityCliPath(), [resolvedPath], (error) => {
+                    if (error) {
+                        logger.error(`Failed to open file via CLI: ${error.message}`);
+                        interaction.editReply({ content: `❌ Error opening file via CLI: ${error.message}` }).catch(() => {});
+                    } else {
+                        interaction.editReply({ content: `✅ Opened file: **${resolvedPath}**` }).catch(() => {});
+                    }
+                });
+            } catch (e: any) {
+                await interaction.editReply({ content: `❌ Error opening file: ${e.message}` });
+            }
             break;
         }
 

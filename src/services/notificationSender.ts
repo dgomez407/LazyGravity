@@ -38,6 +38,9 @@ const ERROR_POPUP_COPY_DEBUG_ACTION_PREFIX = 'error_popup_copy_debug_action';
 const ERROR_POPUP_RETRY_ACTION_PREFIX = 'error_popup_retry_action';
 const RUN_COMMAND_RUN_ACTION_PREFIX = 'run_command_run_action';
 const RUN_COMMAND_REJECT_ACTION_PREFIX = 'run_command_reject_action';
+export const FEEDBACK_ACTION_PREFIX = 'feedback_action';
+export const QUESTION_SELECT_ACTION_PREFIX = 'question_select_action';
+export const QUESTION_SKIP_ACTION_PREFIX = 'question_skip_action';
 
 // ---------------------------------------------------------------------------
 // Notification colours
@@ -105,8 +108,11 @@ export function buildApprovalNotification(opts: {
     readonly toolNames?: readonly string[];
     /** Additional fields appended after default ones. */
     readonly extraFields?: readonly { readonly name: string; readonly value: string; readonly inline?: boolean }[];
+    /** Whether an 'Always Allow' / 'Allow Chat' button exists. */
+    readonly hasAlwaysAllow?: boolean;
+    readonly alwaysAllowText?: string;
 }): MessagePayload {
-    const { title, description, projectName, channelId, toolNames, extraFields } = opts;
+    const { title, description, projectName, channelId, toolNames, extraFields, hasAlwaysAllow, alwaysAllowText } = opts;
 
     const richContent = pipe(
         createRichContent(),
@@ -126,12 +132,18 @@ export function buildApprovalNotification(opts: {
         (rc) => withTimestamp(rc),
     );
 
+    const buttons = [
+        button(customId(APPROVE_ACTION_PREFIX, projectName, channelId), 'Allow', 'success'),
+    ];
+    
+    if (hasAlwaysAllow) {
+        buttons.push(button(customId(ALWAYS_ALLOW_ACTION_PREFIX, projectName, channelId), alwaysAllowText || 'Allow Chat', 'primary'));
+    }
+    
+    buttons.push(button(customId(DENY_ACTION_PREFIX, projectName, channelId), 'Deny', 'danger'));
+
     const components: readonly ComponentRow[] = [
-        buttonRow(
-            button(customId(APPROVE_ACTION_PREFIX, projectName, channelId), 'Allow', 'success'),
-            button(customId(ALWAYS_ALLOW_ACTION_PREFIX, projectName, channelId), 'Allow Chat', 'primary'),
-            button(customId(DENY_ACTION_PREFIX, projectName, channelId), 'Deny', 'danger'),
-        ),
+        buttonRow(...buttons),
     ];
 
     return { richContent, components };
@@ -145,6 +157,9 @@ export function buildPlanningNotification(opts: {
     readonly channelId: string | null;
     /** Additional fields appended before footer. */
     readonly extraFields?: readonly { readonly name: string; readonly value: string; readonly inline?: boolean }[];
+    readonly hasOpenButton?: boolean;
+    readonly openText?: string;
+    readonly proceedText?: string;
 }): MessagePayload {
     const { title, description, projectName, channelId, extraFields } = opts;
 
@@ -161,11 +176,16 @@ export function buildPlanningNotification(opts: {
         (rc) => withTimestamp(rc),
     );
 
+    const buttons = [];
+    const openLabel = opts.openText || 'Open';
+    if (opts.hasOpenButton !== false) {
+        buttons.push(button(customId(PLANNING_OPEN_ACTION_PREFIX, projectName, channelId), openLabel, 'primary'));
+    }
+    const buttonLabel = opts.proceedText || 'Proceed';
+    buttons.push(button(customId(PLANNING_PROCEED_ACTION_PREFIX, projectName, channelId), buttonLabel, 'success'));
+
     const components: readonly ComponentRow[] = [
-        buttonRow(
-            button(customId(PLANNING_OPEN_ACTION_PREFIX, projectName, channelId), 'Open', 'primary'),
-            button(customId(PLANNING_PROCEED_ACTION_PREFIX, projectName, channelId), 'Proceed', 'success'),
-        ),
+        buttonRow(...buttons),
     ];
 
     return { richContent, components };
@@ -335,6 +355,61 @@ export function buildStatusNotification(opts: {
     );
 
     return { richContent };
+}
+
+export interface BuildQuestionNotificationParams {
+    title: string;
+    description: string;
+    projectName: string;
+    channelId: string;
+    options: { text: string; x: number; y: number }[];
+}
+
+export function buildQuestionNotification(
+    params: BuildQuestionNotificationParams,
+): MessagePayload {
+    const { title, description, projectName, channelId, options } = params;
+
+    const baseContent = pipe(
+        createRichContent(),
+        (rc) => withTitle(rc, title),
+        (rc) => withColor(rc, COLOR_APPROVAL),
+    );
+
+    const embed = description ? withDescription(baseContent, description) : baseContent;
+
+    const selectMenuOptions = options.map((opt, i) => ({
+        label: opt.text.substring(0, 100), // Discord max length for label is 100
+        value: i.toString(),
+    })).slice(0, 25); // Discord max options in a select menu is 25
+
+    const encodedCustomId = `${QUESTION_SELECT_ACTION_PREFIX}:p=${projectName}:c=${channelId}`.substring(0, 100);
+
+    return {
+        richContent: embed,
+        components: [
+            {
+                components: [
+                    {
+                        type: 'selectMenu',
+                        customId: encodedCustomId,
+                        placeholder: 'Select an option...',
+                        options: selectMenuOptions,
+                    },
+                ],
+            },
+            {
+                components: [
+                    {
+                        type: 'button',
+                        customId: `${QUESTION_SKIP_ACTION_PREFIX}:p=${projectName}:c=${channelId}`.substring(0, 100),
+                        label: 'Skip',
+                        style: 'secondary',
+                    },
+                ],
+            },
+        ],
+    };
 }
 
 /** Build a progress / phase notification (e.g. "Thinking...", "Generating..."). */

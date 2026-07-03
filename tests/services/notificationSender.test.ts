@@ -37,6 +37,7 @@ describe('buildApprovalNotification', () => {
         projectName: 'my-project',
         channelId: 'ch-123',
         toolNames: ['Bash', 'Write'],
+        hasAlwaysAllow: true,
     } as const;
 
     it('returns a MessagePayload with richContent', () => {
@@ -154,11 +155,19 @@ describe('buildPlanningNotification', () => {
         expect(payload.richContent!.timestamp).toBeInstanceOf(Date);
     });
 
-    it('contains exactly 2 buttons in one row', () => {
+    it('contains exactly 2 buttons in one row by default', () => {
         const payload = buildPlanningNotification(baseOpts);
         expect(payload.components).toHaveLength(1);
         const buttons = extractButtons(payload);
         expect(buttons).toHaveLength(2);
+    });
+
+    it('contains exactly 1 button when hasOpenButton is false', () => {
+        const payload = buildPlanningNotification({ ...baseOpts, hasOpenButton: false });
+        expect(payload.components).toHaveLength(1);
+        const buttons = extractButtons(payload);
+        expect(buttons).toHaveLength(1);
+        expect(buttons[0].label).toBe('Proceed');
     });
 
     it('has Open and Proceed buttons with correct styles', () => {
@@ -682,6 +691,7 @@ describe('buildResolvedOverlay', () => {
             description: 'Tool execution requires approval',
             projectName: 'my-project',
             channelId: 'ch-123',
+            hasAlwaysAllow: true,
         });
     }
 

@@ -6,6 +6,7 @@ import { ErrorPopupDetector } from './errorPopupDetector';
 import { PlanningDetector } from './planningDetector';
 import { RunCommandDetector } from './runCommandDetector';
 import { UserMessageDetector } from './userMessageDetector';
+import { QuestionDetector } from './questionDetector';
 
 export interface AccountSelection {
     name?: string;
@@ -26,6 +27,7 @@ export class CdpConnectionPool {
     private readonly planningDetectors = new Map<string, PlanningDetector>();
     private readonly runCommandDetectors = new Map<string, RunCommandDetector>();
     private readonly userMessageDetectors = new Map<string, UserMessageDetector>();
+    private readonly questionDetectors = new Map<string, QuestionDetector>();
     private readonly connectingPromises = new Map<string, Promise<CdpService>>();
     private readonly cdpOptions: CdpServiceOptions;
 
@@ -97,6 +99,9 @@ export class CdpConnectionPool {
         this.errorPopupDetectors.get(key)?.stop();
         this.errorPopupDetectors.delete(key);
 
+        this.questionDetectors.get(key)?.stop();
+        this.questionDetectors.delete(key);
+
         this.planningDetectors.get(key)?.stop();
         this.planningDetectors.delete(key);
 
@@ -143,6 +148,18 @@ export class CdpConnectionPool {
         const key = buildConnectionKey(projectName, effectiveAccount);
         this.planningDetectors.get(key)?.stop();
         this.planningDetectors.set(key, detector);
+    }
+
+    getQuestionDetector(projectName: string, accountName: string = 'default'): QuestionDetector | undefined {
+        const effectiveAccount = this.resolveAccountName(projectName, accountName);
+        return this.questionDetectors.get(buildConnectionKey(projectName, effectiveAccount));
+    }
+
+    registerQuestionDetector(projectName: string, detector: QuestionDetector, accountName: string = 'default'): void {
+        const effectiveAccount = this.resolveAccountName(projectName, accountName);
+        const key = buildConnectionKey(projectName, effectiveAccount);
+        this.questionDetectors.get(key)?.stop();
+        this.questionDetectors.set(key, detector);
     }
 
     getPlanningDetector(projectName: string, accountName: string = 'default'): PlanningDetector | undefined {
@@ -224,6 +241,8 @@ export class CdpConnectionPool {
             this.errorPopupDetectors.delete(key);
             this.planningDetectors.get(key)?.stop();
             this.planningDetectors.delete(key);
+            this.questionDetectors.get(key)?.stop();
+            this.questionDetectors.delete(key);
             this.runCommandDetectors.get(key)?.stop();
             this.runCommandDetectors.delete(key);
             this.userMessageDetectors.get(key)?.stop();

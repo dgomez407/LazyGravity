@@ -72,7 +72,7 @@ describe('createErrorPopupButtonAction', () => {
     describe('match', () => {
         it('matches error_popup_dismiss_action customId', () => {
             const bridge = makeBridge();
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const result = action.match('error_popup_dismiss_action:proj:ch-1');
             expect(result).toEqual({
                 action: 'dismiss',
@@ -83,7 +83,7 @@ describe('createErrorPopupButtonAction', () => {
 
         it('matches error_popup_copy_debug_action customId', () => {
             const bridge = makeBridge();
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const result = action.match('error_popup_copy_debug_action:proj');
             expect(result).toEqual({
                 action: 'copy_debug',
@@ -94,7 +94,7 @@ describe('createErrorPopupButtonAction', () => {
 
         it('matches error_popup_retry_action customId', () => {
             const bridge = makeBridge();
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const result = action.match('error_popup_retry_action:proj:ch-2');
             expect(result).toEqual({
                 action: 'retry',
@@ -105,7 +105,7 @@ describe('createErrorPopupButtonAction', () => {
 
         it('returns null for unrelated customId', () => {
             const bridge = makeBridge();
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             expect(action.match('approve_action:proj')).toBeNull();
             expect(action.match('random')).toBeNull();
         });
@@ -117,7 +117,7 @@ describe('createErrorPopupButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getErrorPopupDetector as jest.Mock).mockReturnValue(mockDetector);
 
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {
@@ -138,7 +138,7 @@ describe('createErrorPopupButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getErrorPopupDetector as jest.Mock).mockReturnValue(mockDetector);
 
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {
@@ -162,7 +162,7 @@ describe('createErrorPopupButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getErrorPopupDetector as jest.Mock).mockReturnValue(mockDetector);
 
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {
@@ -191,7 +191,7 @@ describe('createErrorPopupButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getErrorPopupDetector as jest.Mock).mockReturnValue(mockDetector);
 
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {
@@ -212,7 +212,7 @@ describe('createErrorPopupButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getErrorPopupDetector as jest.Mock).mockReturnValue(mockDetector);
 
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {
@@ -234,7 +234,7 @@ describe('createErrorPopupButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getErrorPopupDetector as jest.Mock).mockReturnValue(mockDetector);
 
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {
@@ -255,7 +255,7 @@ describe('createErrorPopupButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getErrorPopupDetector as jest.Mock).mockReturnValue(mockDetector);
 
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {
@@ -276,7 +276,7 @@ describe('createErrorPopupButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getErrorPopupDetector as jest.Mock).mockReturnValue(mockDetector);
 
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {
@@ -296,7 +296,7 @@ describe('createErrorPopupButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getErrorPopupDetector as jest.Mock).mockReturnValue(undefined);
 
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {
@@ -312,7 +312,7 @@ describe('createErrorPopupButtonAction', () => {
 
         it('rejects interaction from wrong channel', async () => {
             const bridge = makeBridge();
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction({
                 channel: makeChannel({ id: 'ch-other' }),
             });
@@ -328,12 +328,13 @@ describe('createErrorPopupButtonAction', () => {
             });
         });
 
-        it('falls back to lastActiveWorkspace when projectName is empty', async () => {
+        it('falls back to wsHandler when projectName is empty', async () => {
             const mockDetector = { clickRetryButton: jest.fn().mockResolvedValue(true) };
-            const bridge = makeBridge({ lastActiveWorkspace: 'fallbackWs' });
+            const bridge = makeBridge();
             (bridge.pool.getErrorPopupDetector as jest.Mock).mockReturnValue(mockDetector);
+            bridge.pool.extractProjectName = jest.fn().mockReturnValue('fallbackWs');
 
-            const action = createErrorPopupButtonAction({ bridge });
+            const action = createErrorPopupButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn().mockReturnValue('/path/to/ws') } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {

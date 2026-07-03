@@ -28,6 +28,7 @@ describe('interactionCreateHandler', () => {
             parseApprovalCustomId: jest.fn(),
             parseErrorPopupCustomId: jest.fn().mockReturnValue(null),
             parsePlanningCustomId: jest.fn().mockReturnValue(null),
+            parseFileChangeCustomId: jest.fn().mockReturnValue(null),
             parseRunCommandCustomId: jest.fn().mockReturnValue(null),
             handleSlashInteraction: jest.fn(),
         });
@@ -82,6 +83,7 @@ describe('interactionCreateHandler', () => {
             }),
             parseErrorPopupCustomId: jest.fn().mockReturnValue(null),
             parsePlanningCustomId: jest.fn().mockReturnValue(null),
+            parseFileChangeCustomId: jest.fn().mockReturnValue(null),
             parseRunCommandCustomId: jest.fn().mockReturnValue(null),
             handleSlashInteraction: jest.fn(),
         });
@@ -132,6 +134,7 @@ describe('interactionCreateHandler', () => {
             parseApprovalCustomId: jest.fn().mockReturnValue(null),
             parseErrorPopupCustomId: jest.fn().mockReturnValue(null),
             parsePlanningCustomId: jest.fn().mockReturnValue(null),
+            parseFileChangeCustomId: jest.fn().mockReturnValue(null),
             parseRunCommandCustomId: jest.fn().mockReturnValue(null),
             handleSlashInteraction: jest.fn(),
         });
@@ -144,6 +147,55 @@ describe('interactionCreateHandler', () => {
         expect(followUp).toHaveBeenCalledWith(
             expect.objectContaining({ content: 'ok', flags: 64 }),
         );
+    });
+
+    it('handles generic action_btn_ by injecting into CDP', async () => {
+        const deferUpdate = jest.fn().mockResolvedValue(undefined);
+        const cdp = {
+            injectMessage: jest.fn().mockResolvedValue({ ok: true }),
+        };
+        const interaction = {
+            isAutocomplete: () => false,
+            isButton: () => true,
+            isStringSelectMenu: () => false,
+            isChatInputCommand: () => false,
+            user: { id: 'allowed' },
+            customId: 'action_btn_proceed',
+            channelId: 'channel-x',
+            deferUpdate,
+        } as any;
+
+        const handler = createInteractionCreateHandler({
+            config: { allowedUserIds: ['allowed'] },
+            bridge: {
+                pool: {
+                    getConnected: jest.fn().mockReturnValue(cdp),
+                },
+            } as any,
+            cleanupHandler: {} as any,
+            modeService: {} as any,
+            modelService: {} as any,
+            slashCommandHandler: {} as any,
+            wsHandler: {} as any,
+            chatHandler: {} as any,
+            client: {} as any,
+            sendModeUI: jest.fn(),
+            sendModelsUI: jest.fn(),
+            sendAutoAcceptUI: jest.fn(),
+            handleScreenshot: jest.fn(),
+            getCurrentCdp: jest.fn().mockResolvedValue(cdp),
+            parseApprovalCustomId: jest.fn().mockReturnValue(null),
+            parseErrorPopupCustomId: jest.fn().mockReturnValue(null),
+            parsePlanningCustomId: jest.fn().mockReturnValue(null),
+            parseFileChangeCustomId: jest.fn().mockReturnValue(null),
+            parseRunCommandCustomId: jest.fn().mockReturnValue(null),
+            handleSlashInteraction: jest.fn(),
+        });
+
+        await handler(interaction);
+
+        expect(deferUpdate).toHaveBeenCalled();
+        expect(cdp.injectMessage).toHaveBeenCalledWith('Proceed');
     });
 
     it('handles account dropdown selection and persists global/channel account choice for non-session channels', async () => {
@@ -189,6 +241,7 @@ describe('interactionCreateHandler', () => {
             parseApprovalCustomId: jest.fn().mockReturnValue(null),
             parseErrorPopupCustomId: jest.fn().mockReturnValue(null),
             parsePlanningCustomId: jest.fn().mockReturnValue(null),
+            parseFileChangeCustomId: jest.fn().mockReturnValue(null),
             parseRunCommandCustomId: jest.fn().mockReturnValue(null),
             handleSlashInteraction: jest.fn(),
             accountPrefRepo: accountPrefRepo as any,
@@ -256,6 +309,7 @@ describe('interactionCreateHandler', () => {
             parseApprovalCustomId: jest.fn().mockReturnValue(null),
             parseErrorPopupCustomId: jest.fn().mockReturnValue(null),
             parsePlanningCustomId: jest.fn().mockReturnValue(null),
+            parseFileChangeCustomId: jest.fn().mockReturnValue(null),
             parseRunCommandCustomId: jest.fn().mockReturnValue(null),
             handleSlashInteraction: jest.fn(),
             accountPrefRepo: accountPrefRepo as any,

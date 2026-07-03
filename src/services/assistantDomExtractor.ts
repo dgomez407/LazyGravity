@@ -19,7 +19,7 @@ import { htmlToDiscordMarkdown } from '../utils/htmlToDiscordMarkdown';
  */
 export interface AssistantDomSegment {
     /** The type of content: assistant text, thinking trace, tool interaction, etc. */
-    kind: 'assistant-body' | 'thinking' | 'tool-call' | 'tool-result' | 'feedback';
+    kind: 'assistant-body' | 'thinking' | 'tool-call' | 'tool-result' | 'feedback' | 'plan-card' | 'action-button' | 'file-change' | 'citation' | 'file-changes';
     /** The content (often HTML for body, plain text for logs) */
     text: string;
     /** The role is always 'assistant' for these segments */
@@ -46,6 +46,12 @@ export interface ClassifyResult {
     finalOutputText: string;
     activityLines: string[];
     feedback: string[];
+    planCards: string[];
+    actionButtons: string[];
+    fileChanges: { path: string; type: string }[];
+    citations: string[];
+    fileChangesTexts: string[];
+    citedFiles: string[];
     diagnostics: {
         source: 'dom-structured' | 'legacy-fallback';
         segmentCounts: Record<string, number>;
@@ -71,6 +77,12 @@ export function classifyAssistantSegments(payload: unknown): ClassifyResult {
             finalOutputText: '',
             activityLines: [],
             feedback: [],
+            planCards: [],
+            actionButtons: [],
+            fileChanges: [],
+            citations: [],
+            fileChangesTexts: [],
+            citedFiles: [],
             diagnostics: {
                 source: 'legacy-fallback',
                 segmentCounts: {},
@@ -87,9 +99,14 @@ export function classifyAssistantSegments(payload: unknown): ClassifyResult {
     const bodyTexts: string[] = [];
     const activityLines: string[] = [];
     const feedbackTexts: string[] = [];
+    const planCards: string[] = [];
+    const actionButtons: string[] = [];
+    const fileChanges: { path: string; type: string }[] = [];
+    const citations: string[] = [];
     const segmentCounts: Record<string, number> = {};
     const allFingerprints: string[] = [];
 
+    const fileChangesTexts: string[] = [];
     for (const seg of segments) {
         segmentCounts[seg.kind] = (segmentCounts[seg.kind] ?? 0) + 1;
 
@@ -113,6 +130,32 @@ export function classifyAssistantSegments(payload: unknown): ClassifyResult {
                     feedbackTexts.push(seg.text.trim());
                 }
                 break;
+            case 'plan-card':
+                if (seg.text && seg.text.trim()) {
+                    planCards.push(seg.text.trim());
+                }
+                break;
+            case 'action-button':
+                if (seg.text && seg.text.trim()) {
+                    actionButtons.push(seg.text.trim());
+                }
+                break;
+            case 'file-change':
+                if (seg.text && seg.text.trim()) {
+                    const parts = seg.text.split('|');
+                    fileChanges.push({ path: parts[0]?.trim() || '', type: parts[1]?.trim() || '' });
+                }
+                break;
+            case 'citation':
+                if (seg.text && seg.text.trim()) {
+                    citations.push(seg.text.trim());
+                }
+                break;
+            case 'file-changes':
+                if (seg.text && seg.text.trim()) {
+                    fileChangesTexts.push(seg.text.trim());
+                }
+                break;
         }
     }
 
@@ -121,10 +164,38 @@ export function classifyAssistantSegments(payload: unknown): ClassifyResult {
     const lastBody = bodyTexts.join('\n\n') || '';
     const finalOutputText = htmlToDiscordMarkdown(lastBody);
 
+    // Extract file:/// links from finalOutputText
+    const citedFiles: string[] = [];
+    const fileRegex = /\[.*?\]\((file:\/\/\/[^\)]+)\)/g;
+    let match;
+    while ((match = fileRegex.exec(finalOutputText)) !== null) {
+        const fileUrl = match[1];
+        if (!citedFiles.includes(fileUrl)) {
+            citedFiles.push(fileUrl);
+        }
+    }
+
+    // Also extract backticked inline code that looks like a filename with common extensions
+    // e.g., `implementation_plan.md`
+    const inlineCodeRegex = /`([a-zA-Z0-9_\-\.]+\.(?:md|ts|js|json|html|css|txt|csv|py|java|go|cpp|c))`[^`]?/g;
+    let inlineMatch;
+    while ((inlineMatch = inlineCodeRegex.exec(finalOutputText)) !== null) {
+        const filename = inlineMatch[1];
+        if (!citedFiles.includes(filename)) {
+            citedFiles.push(filename);
+        }
+    }
+
     return {
         finalOutputText,
         activityLines,
         feedback: feedbackTexts,
+        planCards,
+        actionButtons,
+        fileChanges,
+        citations,
+        fileChangesTexts,
+        citedFiles,
         diagnostics: {
             source: 'dom-structured',
             segmentCounts,
@@ -197,10 +268,11 @@ export function extractAssistantSegmentsPayloadScript(): string {
         if (node.closest('details')) return true;
         if (node.closest('[class*="feedback"], footer')) return true;
         if (node.closest('.notify-user-container')) return true;
-        if (node.closest('[role="dialog"]')) return true;
-        if (node.closest('form')) return true;
+        // removed form and dialog exclusions to allow interactive tool forms (ask_question, ask_permission)
         if (node.closest('[data-message-author-role="user"], [data-message-role="user"]')) return true;
-        if (node.querySelector('textarea') || node.closest('textarea')) return true;
+        // We do not exclude nodes just because they contain a textarea (e.g. ask_question "Other" option).
+        // The main chat input is excluded by the "ask anything" check below.
+        if (node.tagName && node.tagName.toLowerCase() === 'textarea') return true;
         var text = (node.innerText || '').toLowerCase();
         if (text.includes('ask anything, @ to mention')) return true;
         if (text.includes('0 files with changes')) return true;
@@ -413,6 +485,86 @@ export function extractAssistantSegmentsPayloadScript(): string {
             });
         }
     }
+
+    // Pass 4: Extract Antigravity 2.0 structured cards and artifacts
+    // 4a. Plan Cards
+    var planNodes = scope.querySelectorAll('[data-testid="plan-card"], [class*="plan-summary"]');
+    for (var pi2 = 0; pi2 < planNodes.length; pi2++) {
+        var pnode = planNodes[pi2];
+        var ptext = (pnode.innerText || pnode.textContent || '').trim();
+        if (ptext) {
+            segments.push({
+                kind: 'plan-card',
+                text: ptext,
+                role: 'assistant',
+                messageIndex: 0,
+                domPath: 'plan-card:nth(' + pi2 + ')'
+            });
+        }
+    }
+
+    // 4b. Action Buttons (Open, Proceed, Review, etc.) - outside feedback footers
+    var actionBtns = scope.querySelectorAll('.actions-container button, [class*="action-btn"], .review-button, [class*="review-btn"]');
+    for (var abi = 0; abi < actionBtns.length; abi++) {
+        var abtnText = (actionBtns[abi].textContent || '').trim();
+        if (!abtnText) continue;
+        var lower = abtnText.toLowerCase();
+        // Ignore approval buttons since they are handled by approvalDetector
+        if (lower.includes('accept all') || lower.includes('reject all')) continue;
+
+        segments.push({
+            kind: 'action-button',
+            text: abtnText,
+            role: 'assistant',
+            messageIndex: 0,
+            domPath: 'action-btn.' + abtnText.toLowerCase().replace(/\s+/g, '-')
+        });
+    }
+
+    // 4c. File Edits
+    var fileEdits = scope.querySelectorAll('[class*="file-edit-item"], .file-edit-item, .bottom-full .cursor-pointer');
+    for (var fei = 0; fei < fileEdits.length; fei++) {
+        var editNode = fileEdits[fei];
+        if (seen.has(editNode)) continue;
+        seen.add(editNode);
+        var fpath = (editNode.querySelector('.file-path, [class*="path"]') || {}).textContent || '';
+        var ftype = (editNode.querySelector('.edit-type, [class*="type"]') || {}).textContent || 'Modified';
+        
+        if (!fpath) {
+            var spans = editNode.querySelectorAll('span.whitespace-nowrap.text-sm');
+            if (spans.length > 0) {
+                fpath = spans[0].textContent || '';
+            }
+        }
+        if (!fpath) fpath = (editNode.textContent || '').trim();
+        if (fpath) {
+            segments.push({
+                kind: 'file-change',
+                text: fpath.trim() + '|' + ftype.trim(),
+                role: 'assistant',
+                messageIndex: 0,
+                domPath: 'file-edit:nth(' + fei + ')'
+            });
+        }
+    }
+
+    // 4d. Citations
+    var citationNodes = scope.querySelectorAll('[class*="citation"], a[href^="file://"]');
+    for (var cti = 0; cti < citationNodes.length; cti++) {
+        var cnode = citationNodes[cti];
+        var ctext = (cnode.getAttribute('href') || cnode.textContent || '').trim();
+        if (ctext) {
+            segments.push({
+                kind: 'citation',
+                text: ctext,
+                role: 'assistant',
+                messageIndex: 0,
+                domPath: 'citation:nth(' + cti + ')'
+            });
+        }
+    }
+
+
 
     if (!bodyFound && segments.length === 0) return null;
 

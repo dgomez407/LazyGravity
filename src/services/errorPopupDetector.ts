@@ -130,8 +130,12 @@ export class ErrorPopupDetector {
     private lastDetectedInfo: ErrorPopupInfo | null = null;
     /** Timestamp of last notification (for cooldown-based dedup) */
     private lastNotifiedAt: number = 0;
-    /** Cooldown period in ms to suppress duplicate notifications (10s for error popups) */
-    private static readonly COOLDOWN_MS = 10000;
+    /** Number of consecutive polls without detecting buttons */
+    private emptyPollCount: number = 0;
+    /** Cooldown period in ms to suppress duplicate notifications */
+    private static readonly COOLDOWN_MS = 5000;
+    /** Number of consecutive empty polls required before resetting state */
+    private static readonly REQUIRED_EMPTY_POLLS = 3;
 
     constructor(options: ErrorPopupDetectorOptions) {
         this.cdpService = options.cdpService;
@@ -147,6 +151,7 @@ export class ErrorPopupDetector {
         this.lastDetectedKey = null;
         this.lastDetectedInfo = null;
         this.lastNotifiedAt = 0;
+        this.emptyPollCount = 0;
         this.schedulePoll();
     }
 
@@ -241,6 +246,7 @@ export class ErrorPopupDetector {
             const info: ErrorPopupInfo | null = result?.result?.value ?? null;
 
             if (info) {
+                this.emptyPollCount = 0;
                 // Duplicate prevention: use title + body snippet as key
                 const key = `${info.title}::${info.body.slice(0, 100)}`;
                 const now = Date.now();
@@ -255,12 +261,15 @@ export class ErrorPopupDetector {
                     this.lastDetectedInfo = info;
                 }
             } else {
-                // Reset when popup disappears (prepare for next detection)
-                const wasDetected = this.lastDetectedKey !== null;
-                this.lastDetectedKey = null;
-                this.lastDetectedInfo = null;
-                if (wasDetected && this.onResolved) {
-                    this.onResolved();
+                this.emptyPollCount++;
+                if (this.emptyPollCount >= ErrorPopupDetector.REQUIRED_EMPTY_POLLS) {
+                    // Reset when popup disappears (prepare for next detection)
+                    const wasDetected = this.lastDetectedKey !== null;
+                    this.lastDetectedKey = null;
+                    this.lastDetectedInfo = null;
+                    if (wasDetected && this.onResolved) {
+                        this.onResolved();
+                    }
                 }
             }
         } catch (error) {

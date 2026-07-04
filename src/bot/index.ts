@@ -1909,10 +1909,7 @@ export async function handleSlashInteraction(
                 const projectName = bridge.pool.extractProjectName(workspacePath);
                 return bridge.pool.getConnected(projectName, resolveSelectedAccount());
             }
-
-            return bridge.lastActiveWorkspace
-                ? bridge.pool.getConnected(bridge.lastActiveWorkspace, resolveSelectedAccount())
-                : null;
+            return null;
         })();
     const ensureChannelCdp = async (): Promise<CdpService | null> => {
         const existing = getChannelCdp();
@@ -2444,39 +2441,46 @@ export async function handleSlashInteraction(
 
         case 'open': {
             const filepath = interaction.options.getString('filepath', true);
-            let resolvedPath = filepath;
-            if (filepath.startsWith('file:///')) {
-                // Windows fix: remove leading slash if it's file:///C:/...
-                let rawPath = filepath.replace('file:///', '');
-                if (process.platform === 'win32' && rawPath.startsWith('/')) {
-                    rawPath = rawPath.substring(1);
+            let resolvedPath: string | null = null;
+            
+            // 1. Try to resolve as an artifact
+            if (chatSessionRepo && artifactService) {
+                const session = chatSessionRepo.findByChannelId(interaction.channelId);
+                if (session && session.conversationId) {
+                    const possibleArtifact = artifactService.getArtifactPath(session.conversationId, filepath);
+                    if (fs.existsSync(possibleArtifact)) {
+                        resolvedPath = possibleArtifact;
+                    }
                 }
-                resolvedPath = path.resolve(rawPath);
-            } else if (!path.isAbsolute(filepath)) {
-                // Try resolving as an artifact first
-                if (chatSessionRepo && artifactService) {
-                    const session = chatSessionRepo.findByChannelId(interaction.channelId);
-                    if (session && session.conversationId) {
-                        const possibleArtifact = artifactService.getArtifactPath(session.conversationId, filepath);
-                        if (fs.existsSync(possibleArtifact)) {
-                            resolvedPath = possibleArtifact;
+            }
+            
+            // 2. Try to resolve against the workspace
+            if (!resolvedPath) {
+                const cdp = await ensureChannelCdp();
+                if (cdp) {
+                    const wsPath = cdp.getCurrentWorkspacePath();
+                    if (wsPath) {
+                        let rawPath = filepath;
+                        if (filepath.startsWith('file:///')) {
+                            rawPath = filepath.replace('file:///', '');
+                            if (process.platform === 'win32' && rawPath.startsWith('/')) {
+                                rawPath = rawPath.substring(1);
+                            }
+                        }
+                        const candidatePath = path.isAbsolute(rawPath) ? rawPath : path.join(wsPath, rawPath);
+                        const relative = path.relative(wsPath, candidatePath);
+                        if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
+                            resolvedPath = candidatePath;
                         }
                     }
                 }
-                
-                // If still not absolute (meaning artifact not found), try workspace
-                if (!path.isAbsolute(resolvedPath)) {
-                    // Try to resolve against workspace
-                    const cdp = await ensureChannelCdp();
-                    if (cdp) {
-                        const wsPath = cdp.getCurrentWorkspacePath();
-                        if (wsPath) {
-                            resolvedPath = path.join(wsPath, filepath);
-                        }
-                    } else {
-                        resolvedPath = path.resolve(filepath);
-                    }
-                }
+            }
+
+            if (!resolvedPath) {
+                await interaction.editReply({
+                    content: '❌ Error: Cannot resolve file path. Ensure the file exists as an artifact or within the current workspace.'
+                });
+                break;
             }
 
             try {

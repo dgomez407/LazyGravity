@@ -384,17 +384,17 @@ export function buildQuestionNotification(
     })).slice(0, 25); // Discord max options in a select menu is 25
 
     // Ensure customIds fit within 100 chars without losing channelId
-    const selectOverhead = QUESTION_SELECT_ACTION_PREFIX.length + 6 + channelId.length;
+    const selectOverhead = QUESTION_SELECT_ACTION_PREFIX.length + 2 + channelId.length;
     const safeSelectProjectName = projectName.length > (100 - selectOverhead) 
         ? projectName.substring(0, 100 - selectOverhead) 
         : projectName;
-    const encodedCustomId = `${QUESTION_SELECT_ACTION_PREFIX}:p=${safeSelectProjectName}:c=${channelId}`;
+    const encodedCustomId = `${QUESTION_SELECT_ACTION_PREFIX}:${safeSelectProjectName}:${channelId}`;
 
-    const skipOverhead = QUESTION_SKIP_ACTION_PREFIX.length + 6 + channelId.length;
+    const skipOverhead = QUESTION_SKIP_ACTION_PREFIX.length + 2 + channelId.length;
     const safeSkipProjectName = projectName.length > (100 - skipOverhead) 
         ? projectName.substring(0, 100 - skipOverhead) 
         : projectName;
-    const encodedSkipCustomId = `${QUESTION_SKIP_ACTION_PREFIX}:p=${safeSkipProjectName}:c=${channelId}`;
+    const encodedSkipCustomId = `${QUESTION_SKIP_ACTION_PREFIX}:${safeSkipProjectName}:${channelId}`;
 
     return {
         richContent: embed,

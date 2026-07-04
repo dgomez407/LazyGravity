@@ -9,6 +9,7 @@ import type { PlatformButtonInteraction } from '../platform/types';
 import type { ButtonAction } from './buttonHandler';
 import type { CdpBridge } from '../services/cdpBridgeManager';
 import { parseApprovalCustomId } from '../services/cdpBridgeManager';
+import { resolveProjectName } from '../utils/projectResolver';
 import type { WorkspaceCommandHandler } from '../commands/workspaceCommandHandler';
 import { logger } from '../utils/logger';
 
@@ -48,11 +49,7 @@ export function createApprovalButtonAction(
                 return;
             }
 
-            let projectName: string | undefined = params.projectName;
-            if (!projectName) {
-                const workspacePath = deps.wsHandler.getWorkspaceForChannel(interaction.channel.id);
-                projectName = workspacePath ? deps.bridge.pool.extractProjectName(workspacePath) : undefined;
-            }
+            const projectName = resolveProjectName(deps, interaction.channel.id, params.projectName);
             logger.debug(`[ApprovalAction] action=${action} project=${projectName ?? 'null'} channel=${interaction.channel.id}`);
 
             const detector = projectName

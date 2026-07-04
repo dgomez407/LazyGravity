@@ -10,18 +10,8 @@ export interface QuestionSelectActionDeps {
     readonly wsHandler: WorkspaceCommandHandler;
 }
 
-export function parseQuestionCustomId(customId: string): { action: string; projectName?: string; channelId?: string } | null {
-    if (!customId.startsWith(QUESTION_SELECT_ACTION_PREFIX)) return null;
-
-    const parts = customId.split(':');
-    const result: any = { action: parts[0] };
-    for (let i = 1; i < parts.length; i++) {
-        const [k, ...rest] = parts[i].split('=');
-        if (k === 'p') result.projectName = rest.join('=');
-        else if (k === 'c') result.channelId = rest.join('=');
-    }
-    return result;
-}
+import { parseQuestionCustomId } from '../utils/questionActionUtils';
+import { resolveProjectName } from '../utils/projectResolver';
 
 export function createQuestionSelectAction(deps: QuestionSelectActionDeps): SelectAction {
     return {
@@ -33,7 +23,7 @@ export function createQuestionSelectAction(deps: QuestionSelectActionDeps): Sele
             interaction: PlatformSelectInteraction,
             values: readonly string[],
         ): Promise<void> {
-            const parsed = parseQuestionCustomId(interaction.customId);
+            const parsed = parseQuestionCustomId(interaction.customId, QUESTION_SELECT_ACTION_PREFIX);
             if (!parsed) return;
 
             const selectedOption = parseInt(values[0], 10);
@@ -47,11 +37,7 @@ export function createQuestionSelectAction(deps: QuestionSelectActionDeps): Sele
                 return;
             }
 
-            let projectName: string | undefined = parsed.projectName;
-            if (!projectName) {
-                const workspacePath = deps.wsHandler.getWorkspaceForChannel(interaction.channel.id);
-                projectName = workspacePath ? deps.bridge.pool.extractProjectName(workspacePath) : undefined;
-            }
+            const projectName = resolveProjectName(deps, interaction.channel.id, parsed.projectName);
             logger.debug(`[QuestionSelectAction] project=${projectName ?? 'null'} channel=${interaction.channel.id}`);
 
             const detector = projectName

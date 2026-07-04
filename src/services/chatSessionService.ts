@@ -28,6 +28,22 @@ interface SessionViewState extends ChatSessionInfo {
     }>;
 }
 
+/** Shared fuzzy-matching logic for in-page scripts */
+const FUZZY_MATCH_HELPERS_SCRIPT = `
+    const getWords = (str) => {
+        return (str || '').toLowerCase()
+            .replace(/[^a-z0-9\\u3040-\\u30ff\\u4e00-\\u9faf\\s]/g, '')
+            .split(/\\s+/)
+            .filter(w => w.length > 1 && !/^(ago|wks?|days?|mins?|hours?|hrs?|secs?|weeks?|months?|years?)$/i.test(w));
+    };
+    const wordsMatch = (t, p) => {
+        const tWords = getWords(t);
+        const pWords = getWords(p);
+        if (pWords.length === 0) return false;
+        return pWords.every(pw => tWords.some(tw => tw.startsWith(pw) || pw.startsWith(tw)));
+    };
+`;
+
 /** Script to get the state of the new chat button */
 const GET_NEW_CHAT_BUTTON_SCRIPT = `(() => {
     const btn = document.querySelector('[data-tooltip-id="new-conversation-tooltip"]');
@@ -272,18 +288,7 @@ function buildActivateChatByTitleScript(title: string): string {
             return true;
         };
 
-        const getWords = (str) => {
-            return (str || '').toLowerCase()
-                .replace(/[^a-z0-9\u3040-\u30ff\u4e00-\u9faf\s]/g, '')
-                .split(/\s+/)
-                .filter(w => w.length > 1 && !/^(ago|wks?|days?|mins?|hours?|hrs?|secs?|weeks?|months?|years?)$/i.test(w));
-        };
-        const wordsMatch = (t, p) => {
-            const tWords = getWords(t);
-            const pWords = getWords(p);
-            if (pWords.length === 0) return false;
-            return pWords.every(pw => tWords.some(tw => tw.startsWith(pw) || pw.startsWith(tw)));
-        };
+        ${FUZZY_MATCH_HELPERS_SCRIPT}
 
         const nodes = Array.from(panel.querySelectorAll('button, [role="button"], a, li, div, span'))
             .filter(isVisible);
@@ -372,18 +377,7 @@ export function buildActivateViaPastConversationsScript(title: string): string {
             const clickable = el.closest('button, [role="button"], a, li, [role="option"], [data-testid*="conversation"]');
             return clickable instanceof HTMLElement ? clickable : (el instanceof HTMLElement ? el : null);
         };
-        const getWords = (str) => {
-            return (str || '').toLowerCase()
-                .replace(/[^a-z0-9\u3040-\u30ff\u4e00-\u9faf\s]/g, '')
-                .split(/\s+/)
-                .filter(w => w.length > 1 && !/^(ago|wks?|days?|mins?|hours?|hrs?|secs?|weeks?|months?|years?)$/i.test(w));
-        };
-        const wordsMatch = (t, p) => {
-            const tWords = getWords(t);
-            const pWords = getWords(p);
-            if (pWords.length === 0) return false;
-            return pWords.every(pw => tWords.some(tw => tw.startsWith(pw) || pw.startsWith(tw)));
-        };
+        ${FUZZY_MATCH_HELPERS_SCRIPT}
 
         const pickBest = (elements, patterns) => {
             const matched = [];

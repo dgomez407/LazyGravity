@@ -10,23 +10,13 @@ export interface QuestionSkipActionDeps {
     readonly wsHandler: WorkspaceCommandHandler;
 }
 
-export function parseQuestionSkipCustomId(customId: string): { action: string; projectName?: string; channelId?: string } | null {
-    if (!customId.startsWith(QUESTION_SKIP_ACTION_PREFIX)) return null;
-
-    const parts = customId.split(':');
-    const result: any = { action: parts[0] };
-    for (let i = 1; i < parts.length; i++) {
-        const [k, ...rest] = parts[i].split('=');
-        if (k === 'p') result.projectName = rest.join('=');
-        else if (k === 'c') result.channelId = rest.join('=');
-    }
-    return result;
-}
+import { parseQuestionCustomId } from '../utils/questionActionUtils';
+import { resolveProjectName } from '../utils/projectResolver';
 
 export function createQuestionSkipAction(deps: QuestionSkipActionDeps): ButtonAction {
     return {
         match(customId: string): Record<string, string> | null {
-            const parsed = parseQuestionSkipCustomId(customId);
+            const parsed = parseQuestionCustomId(customId, QUESTION_SKIP_ACTION_PREFIX);
             return parsed ? { action: parsed.action } : null;
         },
 
@@ -34,7 +24,7 @@ export function createQuestionSkipAction(deps: QuestionSkipActionDeps): ButtonAc
             interaction: PlatformButtonInteraction,
             params: Record<string, string>,
         ): Promise<void> {
-            const parsed = parseQuestionSkipCustomId(interaction.customId);
+            const parsed = parseQuestionCustomId(interaction.customId, QUESTION_SKIP_ACTION_PREFIX);
             if (!parsed) return;
 
             const channelId = parsed.channelId;
@@ -45,11 +35,7 @@ export function createQuestionSkipAction(deps: QuestionSkipActionDeps): ButtonAc
                 return;
             }
 
-            let projectName: string | undefined = parsed.projectName;
-            if (!projectName) {
-                const workspacePath = deps.wsHandler.getWorkspaceForChannel(interaction.channel.id);
-                projectName = workspacePath ? deps.bridge.pool.extractProjectName(workspacePath) : undefined;
-            }
+            const projectName = resolveProjectName(deps, interaction.channel.id, parsed.projectName);
             logger.debug(`[QuestionSkipAction] project=${projectName ?? 'null'} channel=${interaction.channel.id}`);
 
             const detector = projectName

@@ -55,7 +55,7 @@ const DETECT_PLANNING_SCRIPT = `(() => {
 
     for (const btn of allButtons) {
         const t = normalize(btn.textContent || '');
-        if (t === 'review changes') continue; // Ignore file change review button
+        if (t.includes('review changes')) continue; // Ignore file change review button
 
         // If we hit an accept or reject button before finding a proceed button, 
         // it means the most recent state is an Approval, not Planning.

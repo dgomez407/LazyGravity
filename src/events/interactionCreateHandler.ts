@@ -14,7 +14,7 @@ import fs from 'fs';
 import { t } from '../utils/i18n';
 import { logger } from '../utils/logger';
 import { disableAllButtons } from '../utils/discordButtonUtils';
-import { getAntigravityCliPath } from '../utils/pathUtils';
+import { getAntigravityCliPath, getWorkspaceDirName } from '../utils/pathUtils';
 import { fileOpenCache } from '../utils/fileOpenCache';
 import { TEMPLATE_BTN_PREFIX, parseTemplateButtonId } from '../ui/templateUi';
 import {
@@ -1275,10 +1275,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                 const channelId = (interaction as any).channelId as string;
                 const session = deps.chatSessionRepo?.findByChannelId(channelId);
                 const sessionTitle = session?.displayName?.trim() ?? '';
-                let workspaceDirName: string | undefined;
-                if (session && session.workspacePath) {
-                    workspaceDirName = path.basename(session.workspacePath);
-                }
+                const workspaceDirName = getWorkspaceDirName(session);
                 const conversationId = session?.conversationId || (sessionTitle ? artifactService.findConversationByTitle(sessionTitle, workspaceDirName) : null);
 
                 if (!conversationId) {

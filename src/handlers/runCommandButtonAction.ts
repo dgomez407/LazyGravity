@@ -9,6 +9,7 @@ import type { PlatformButtonInteraction } from '../platform/types';
 import type { ButtonAction } from './buttonHandler';
 import type { CdpBridge } from '../services/cdpBridgeManager';
 import { parseRunCommandCustomId } from '../services/cdpBridgeManager';
+import { resolveProjectName } from '../utils/projectResolver';
 import type { WorkspaceCommandHandler } from '../commands/workspaceCommandHandler';
 import { logger } from '../utils/logger';
 
@@ -47,11 +48,7 @@ export function createRunCommandButtonAction(
                 return;
             }
 
-            let projectName: string | undefined = params.projectName;
-            if (!projectName) {
-                const workspacePath = deps.wsHandler.getWorkspaceForChannel(interaction.channel.id);
-                projectName = workspacePath ? deps.bridge.pool.extractProjectName(workspacePath) : undefined;
-            }
+            const projectName = resolveProjectName(deps, interaction.channel.id, params.projectName);
             const detector = projectName
                 ? deps.bridge.pool.getRunCommandDetector(projectName)
                 : undefined;

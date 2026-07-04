@@ -215,14 +215,13 @@ export class ArtifactService {
             let exactMatch = false;
             let belongsToWorkspace = !filterStr; // True if no filter, or if we prove it belongs
 
-            // 1. Check transcript.jsonl (modern)
-            const transcriptPath = path.join(this.brainBasePath, id, '.system_generated', 'logs', 'transcript.jsonl');
-            try {
-                if (fs.existsSync(transcriptPath)) {
+            const scanFile = (filePath: string, readSize: number) => {
+                try {
+                    if (!fs.existsSync(filePath)) return;
                     let fd = null;
                     try {
-                        fd = fs.openSync(transcriptPath, 'r');
-                        const buf = Buffer.alloc(16384);
+                        fd = fs.openSync(filePath, 'r');
+                        const buf = Buffer.alloc(readSize);
                         const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
                         const content = buf.slice(0, bytesRead).toString('utf-8').toLowerCase();
                         
@@ -245,41 +244,14 @@ export class ArtifactService {
                     } finally {
                         if (fd !== null) fs.closeSync(fd);
                     }
-                }
-            } catch { /* ignore */ }
+                } catch { /* ignore */ }
+            };
+
+            // 1. Check transcript.jsonl (modern)
+            scanFile(path.join(this.brainBasePath, id, '.system_generated', 'logs', 'transcript.jsonl'), 16384);
 
             // 2. Check overview.txt (legacy)
-            const overviewPath = path.join(this.brainBasePath, id, '.system_generated', 'logs', 'overview.txt');
-            try {
-                if (fs.existsSync(overviewPath)) {
-                    let fd = null;
-                    try {
-                        fd = fs.openSync(overviewPath, 'r');
-                        const buf = Buffer.alloc(4096);
-                        const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
-                        const header = buf.slice(0, bytesRead).toString('utf-8').toLowerCase();
-                        
-                        if (filterStr && header.includes(filterStr)) {
-                            belongsToWorkspace = true;
-                        }
-                        
-                        if (belongsToWorkspace) {
-                            if (header.includes(needle)) {
-                                exactMatch = true;
-                            } else {
-                                const headerTokens = new Set(header.replace(/[^\p{L}\p{N}]+/gu, ' ').split(/\s+/));
-                                let currentScore = 0;
-                                for (const word of uniqueNeedleWords) {
-                                    if (headerTokens.has(word)) currentScore++;
-                                }
-                                if (currentScore > score) score = currentScore;
-                            }
-                        }
-                    } finally {
-                        if (fd !== null) fs.closeSync(fd);
-                    }
-                }
-            } catch { /* ignore */ }
+            scanFile(path.join(this.brainBasePath, id, '.system_generated', 'logs', 'overview.txt'), 4096);
 
             if (!belongsToWorkspace) continue;
             

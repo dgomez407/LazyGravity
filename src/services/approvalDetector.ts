@@ -241,7 +241,7 @@ export function buildClickScript(buttonText: string): string {
         const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
         const text = ${safeText};
         const wanted = normalize(text);
-        const allButtons = Array.from(document.querySelectorAll('button, [role="button"], a, span, div')).reverse();
+        const allButtons = Array.from(document.querySelectorAll('button, [role="button"], a, [class*="btn"], [class*="button"], [class*="action"]')).reverse();
         const target = allButtons.find(btn => {
             const style = window.getComputedStyle(btn);
             if (style.display === 'none' || style.visibility === 'hidden' || btn.disabled) return false;
@@ -253,6 +253,7 @@ export function buildClickScript(buttonText: string): string {
                 (ariaLabel.includes(wanted) && ariaLabel.length < wanted.length + 10);
         });
         if (!target) return { ok: false, error: 'Button not found: ' + text };
+        target.scrollIntoView({ block: 'center' });
         const rect = target.getBoundingClientRect();
         const x = rect.left + rect.width / 2;
         const y = rect.top + rect.height / 2;

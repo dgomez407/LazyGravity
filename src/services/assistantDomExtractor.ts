@@ -268,7 +268,13 @@ export function extractAssistantSegmentsPayloadScript(): string {
         if (node.closest('details')) return true;
         if (node.closest('[class*="feedback"], footer')) return true;
         if (node.closest('.notify-user-container')) return true;
-        // removed form and dialog exclusions to allow interactive tool forms (ask_question, ask_permission)
+        // Guard against approval dialogs leaking into the output (they contain plan cards or review buttons)
+        var dialogNode = node.closest('dialog, [role="dialog"], form');
+        if (dialogNode && dialogNode.querySelector('[data-testid="plan-card"], [class*="plan-summary"], .actions-container, .review-button')) {
+            return true;
+        }
+        
+        // allow interactive tool forms (ask_question, ask_permission)
         if (node.closest('[data-message-author-role="user"], [data-message-role="user"]')) return true;
         // We do not exclude nodes just because they contain a textarea (e.g. ask_question "Other" option).
         // The main chat input is excluded by the "ask anything" check below.

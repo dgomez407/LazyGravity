@@ -11,6 +11,7 @@ import {
 import { execFile } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import { parseGenericActionCustomId } from '../handlers/genericActionButtonAction';
 import { t } from '../utils/i18n';
 import { logger } from '../utils/logger';
 import { disableAllButtons } from '../utils/discordButtonUtils';
@@ -248,16 +249,22 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
             }
 
             try {
-                if (interaction.customId.startsWith('action_btn_')) {
-                    const parts = interaction.customId.split(':');
-                    const actionName = parts[0].replace('action_btn_', '').replace(/_/g, ' ');
-                    const formattedName = actionName.charAt(0).toUpperCase() + actionName.slice(1);
+                const genericAction = parseGenericActionCustomId(interaction.customId);
+                if (genericAction) {
+                    const { actionName: formattedName, projectName: parsedProject, channelId } = genericAction;
                     
-                    const projectName = parts[1];
-                    const channelId = parts[2] || interaction.channelId;
+                    if (channelId && channelId !== interaction.channelId) {
+                        await interaction.reply({
+                            content: t('This action is linked to a different session channel.'),
+                            flags: MessageFlags.Ephemeral
+                        }).catch(logger.error);
+                        return;
+                    }
+
+                    const projectName = parsedProject ?? resolveProjectFromChannel(interaction.channelId);
 
                     const cdp = projectName
-                        ? deps.bridge.pool.getConnected(projectName, resolveSelectedAccount(channelId, interaction.user.id))
+                        ? deps.bridge.pool.getConnected(projectName, resolveSelectedAccount(channelId || interaction.channelId, interaction.user.id))
                         : await deps.getCurrentCdp(deps.bridge);
 
                     if (!cdp) {

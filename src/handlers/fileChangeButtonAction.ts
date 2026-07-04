@@ -6,6 +6,8 @@ import { resolveProjectName } from '../utils/projectResolver';
 import type { WorkspaceCommandHandler } from '../commands/workspaceCommandHandler';
 import { logger } from '../utils/logger';
 
+import { buildClickScript } from '../services/approvalDetector';
+
 export interface FileChangeButtonActionDeps {
     readonly bridge: CdpBridge;
     readonly wsHandler: WorkspaceCommandHandler;
@@ -54,23 +56,13 @@ export function createFileChangeButtonAction(
             const targetText = action === 'accept' ? 'Accept all' : 'Reject all';
 
             try {
-                // Send a CDP script to find and click the specific span containing "Accept all" or "Reject all"
                 const result = await cdp.call('Runtime.evaluate', {
-                    expression: `(() => {
-                        var spans = document.querySelectorAll('span');
-                        for (var i = 0; i < spans.length; i++) {
-                            if ((spans[i].textContent || '').trim() === '${targetText}') {
-                                spans[i].click();
-                                return true;
-                            }
-                        }
-                        return false;
-                    })()`,
+                    expression: buildClickScript(targetText),
                     returnByValue: true,
                     awaitPromise: true,
                 });
 
-                if (result?.result?.value === true) {
+                if (result?.result?.value?.ok) {
                     await interaction
                         .update({
                             text: `${action === 'accept' ? '✅ Accepted' : '❌ Rejected'} file changes.`,

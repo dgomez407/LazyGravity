@@ -85,7 +85,7 @@ export class QuestionDetector extends EventEmitter {
             const callParams: any = {
                 expression: `
                 (() => {
-                    const containers = Array.from(document.querySelectorAll('div, form, dialog'));
+                    const containers = Array.from(document.querySelectorAll('div, form, dialog')).reverse();
                     let targetList = null;
                     let submitBtn = null;
                     

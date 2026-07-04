@@ -3,26 +3,61 @@ import type { CdpBridge } from '../services/cdpBridgeManager';
 import { getCurrentCdp } from '../services/cdpBridgeManager';
 import { logger } from '../utils/logger';
 
+import type { WorkspaceChannelHandler } from '../services/workspaceChannelHandler';
+
 export interface GenericActionButtonActionDeps {
     readonly bridge: CdpBridge;
+    readonly wsHandler: WorkspaceChannelHandler;
+}
+
+/**
+ * Parses a generic action button customId into its components.
+ * Format: action_btn_[action_name]:[project_name]:[channel_id]
+ *
+ * @param customId The customId to parse
+ * @returns Parsed action details, or null if not an action button
+ */
+export function parseGenericActionCustomId(customId: string) {
+    if (!customId.startsWith('action_btn_')) return null;
+    const parts = customId.split(':');
+    const actionName = parts[0].replace('action_btn_', '').replace(/_/g, ' ');
+    // Capitalize first letter
+    const formattedName = actionName.charAt(0).toUpperCase() + actionName.slice(1);
+    return {
+        actionName: formattedName,
+        projectName: parts[1] || undefined,
+        channelId: parts[2] || undefined,
+    };
 }
 
 export function createGenericActionButtonAction(deps: GenericActionButtonActionDeps): ButtonAction {
     return {
         match(customId: string): Record<string, string> | null {
-            if (!customId.startsWith('action_btn_')) return null;
-            const actionName = customId.replace('action_btn_', '').replace(/_/g, ' ');
-            // Capitalize first letter
-            const formattedName = actionName.charAt(0).toUpperCase() + actionName.slice(1);
-            return { actionName: formattedName };
+            const parsed = parseGenericActionCustomId(customId);
+            if (!parsed) return null;
+            return { 
+                actionName: parsed.actionName,
+                projectName: parsed.projectName || '',
+                channelId: parsed.channelId || ''
+            };
         },
 
         async execute(interaction, params): Promise<void> {
             const actionName = params.actionName;
+            const channelId = params.channelId || interaction.channel.id;
+            
+            let projectName = params.projectName;
+            if (!projectName && channelId) {
+                const workspacePath = deps.wsHandler.getWorkspaceForChannel(channelId);
+                projectName = workspacePath ? deps.bridge.pool.extractProjectName(workspacePath) : undefined;
+            }
 
             await interaction.deferUpdate();
 
-            const cdp = getCurrentCdp(deps.bridge);
+            const cdp = projectName 
+                ? deps.bridge.pool.getConnected(projectName)
+                : getCurrentCdp(deps.bridge);
+                
             if (!cdp) {
                 await interaction.followUp({
                     text: 'Not connected to Antigravity. Send the action as a message instead.',

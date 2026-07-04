@@ -384,17 +384,21 @@ export function buildQuestionNotification(
     })).slice(0, 25); // Discord max options in a select menu is 25
 
     // Ensure customIds fit within 100 chars without losing channelId
-    const selectOverhead = QUESTION_SELECT_ACTION_PREFIX.length + 2 + channelId.length;
-    const safeSelectProjectName = projectName.length > (100 - selectOverhead) 
-        ? projectName.substring(0, 100 - selectOverhead) 
-        : projectName;
-    const encodedCustomId = `${QUESTION_SELECT_ACTION_PREFIX}:${safeSelectProjectName}:${channelId}`;
+    const encodeSafe = (str: string, maxLen: number) => {
+        let encoded = encodeURIComponent(str);
+        if (encoded.length <= maxLen) return encoded;
+        return encoded.substring(0, maxLen).replace(/(%[0-9A-F]?)$/i, '');
+    };
 
-    const skipOverhead = QUESTION_SKIP_ACTION_PREFIX.length + 2 + channelId.length;
-    const safeSkipProjectName = projectName.length > (100 - skipOverhead) 
-        ? projectName.substring(0, 100 - skipOverhead) 
-        : projectName;
-    const encodedSkipCustomId = `${QUESTION_SKIP_ACTION_PREFIX}:${safeSkipProjectName}:${channelId}`;
+    const encodedChannel = encodeURIComponent(channelId);
+    
+    const selectOverhead = QUESTION_SELECT_ACTION_PREFIX.length + 2 + encodedChannel.length;
+    const safeSelectProjectName = encodeSafe(projectName, 100 - selectOverhead);
+    const encodedCustomId = `${QUESTION_SELECT_ACTION_PREFIX}:${safeSelectProjectName}:${encodedChannel}`;
+
+    const skipOverhead = QUESTION_SKIP_ACTION_PREFIX.length + 2 + encodedChannel.length;
+    const safeSkipProjectName = encodeSafe(projectName, 100 - skipOverhead);
+    const encodedSkipCustomId = `${QUESTION_SKIP_ACTION_PREFIX}:${safeSkipProjectName}:${encodedChannel}`;
 
     return {
         richContent: embed,

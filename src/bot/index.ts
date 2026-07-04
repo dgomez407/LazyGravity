@@ -1725,7 +1725,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     createAutoAcceptButtonAction({ autoAcceptService: bridge.autoAccept }),
                     createTemplateButtonAction({ bridge, templateRepo }),
                     createFileChangeButtonAction({ bridge, wsHandler }),
-                    createGenericActionButtonAction({ bridge }),
+                    createGenericActionButtonAction({ bridge, wsHandler }),
                 ],
             });
 

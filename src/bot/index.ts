@@ -48,6 +48,7 @@ import {
     CLEANUP_CANCEL_BTN,
 } from '../commands/cleanupCommandHandler';
 import { ChannelManager } from '../services/channelManager';
+import type { ScheduleService } from '../services/scheduleService';
 import { TitleGeneratorService } from '../services/titleGeneratorService';
 import { JoinCommandHandler } from '../commands/joinCommandHandler';
 import { isSessionSelectId } from '../ui/sessionPickerUi';
@@ -1373,6 +1374,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         chatSessionService,
         artifactThreadRepo,
         artifactService,
+        channelManager,
+        titleGenerator,
         antigravityAccounts: config.antigravityAccounts,
         handleSlashInteraction: async (
             interaction,
@@ -1389,6 +1392,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             channelPrefRepoArg,
             antigravityAccountsArg,
             chatSessionRepoArg,
+            scheduleServiceArg,
         ) => handleSlashInteraction(
             interaction,
             handler,
@@ -1410,6 +1414,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             antigravityAccountsArg,
             chatSessionRepoArg,
             artifactService,
+            scheduleServiceArg,
         ),
         handleTemplateUse: async (interaction, templateId) => {
             const template = templateRepo.findById(templateId);
@@ -1871,6 +1876,7 @@ export async function handleSlashInteraction(
     antigravityAccounts: AntigravityAccountConfig[] = [{ name: 'default', cdpPort: 9222 }],
     chatSessionRepo?: ChatSessionRepository,
     artifactService?: ArtifactService,
+    scheduleService?: ScheduleService,
 ): Promise<void> {
     const commandName = interaction.commandName;
     const getAccountPort = (accountName: string): number | null => {

@@ -66,9 +66,13 @@ export function createPlanningButtonAction(
 
                 let clicked = false;
                 if (detector.getLastDetectedInfo()?.hasOpenButton) {
-                    clicked = await detector.clickOpenButton();
-                    if (clicked) {
-                        await new Promise((resolve) => setTimeout(resolve, 500));
+                    try {
+                        clicked = await detector.clickOpenButton();
+                        if (clicked) {
+                            await new Promise((resolve) => setTimeout(resolve, 500));
+                        }
+                    } catch (e: any) {
+                        logger.error('[PlanningAction] clickOpenButton failed:', e);
                     }
                 }
 

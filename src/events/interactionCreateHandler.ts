@@ -118,6 +118,8 @@ export interface InteractionCreateHandlerDeps {
     artifactService?: ArtifactService;
     scheduleService?: ScheduleService;
     promptDispatcher?: import('../services/promptDispatcher').PromptDispatcher;
+    channelManager?: import('../services/channelManager').ChannelManager;
+    titleGenerator?: import('../services/titleGeneratorService').TitleGeneratorService;
 }
 
 export function createInteractionCreateHandler(deps: InteractionCreateHandlerDeps) {
@@ -479,8 +481,8 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                                         options: {
                                             chatSessionService: deps.chatSessionService!,
                                             chatSessionRepo: deps.chatSessionRepo!,
-                                            channelManager: {} as any, // Only used for some channel mapping which we don't strictly need here
-                                            titleGenerator: {} as any,
+                                            channelManager: deps.channelManager as any,
+                                            titleGenerator: deps.titleGenerator as any,
                                             userPrefRepo: deps.userPrefRepo,
                                             artifactService: deps.artifactService,
                                         }
@@ -523,10 +525,10 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                         return;
                     }
 
+                    let clicked = false;
                     try {
                         await interaction.deferUpdate();
                         
-                        let clicked = false;
                         if (fileChangeAction.action === 'accept') {
                             const script = buildClickScript('Accept all');
                             const contextId = cdp.getPrimaryContextId();
@@ -576,15 +578,26 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                                 options: {
                                     chatSessionService: deps.chatSessionService!,
                                     chatSessionRepo: deps.chatSessionRepo!,
-                                    channelManager: {} as any,
-                                    titleGenerator: {} as any,
+                                    channelManager: deps.channelManager as any,
+                                    titleGenerator: deps.titleGenerator as any,
                                     userPrefRepo: deps.userPrefRepo,
                                     artifactService: deps.artifactService,
                                 }
                             }).catch(e => logger.error('[FileChange] Failed to resume monitoring:', e));
                         }
                     } catch (err: any) {
-                        logger.error('[FileChange] action error:', err);
+                        if (err?.code === 10062 || err?.code === 40060) {
+                            logger.warn('[FileChange] Interaction expired. Responding directly in the channel.');
+                            if (interaction.channel && 'send' in interaction.channel) {
+                                const actionLabel = fileChangeAction.action === 'accept' ? 'Accept All' : 'Reject All';
+                                const fallbackMessage = clicked
+                                    ? `${actionLabel} completed.`
+                                    : t('File change button not found or error occurred.');
+                                await (interaction.channel as any).send(fallbackMessage).catch(logger.error);
+                            }
+                        } else {
+                            logger.error('[FileChange] action error:', err);
+                        }
                     }
                     return;
                 }
@@ -1038,6 +1051,20 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                             rawPath = rawPath.substring(1);
                         }
                         resolvedPath = path.resolve(rawPath);
+                    }
+
+                    if (interaction.channelId && deps.chatSessionRepo) {
+                        const session = deps.chatSessionRepo.findByChannelId(interaction.channelId);
+                        if (session && session.workspacePath) {
+                            const relative = path.relative(session.workspacePath, resolvedPath);
+                            if (relative.startsWith('..') || path.isAbsolute(relative)) {
+                                await interaction.followUp({
+                                    content: `❌ Error: Cannot open files outside the workspace root.`,
+                                    flags: MessageFlags.Ephemeral
+                                }).catch(logger.error);
+                                return;
+                            }
+                        }
                     }
 
                     try {

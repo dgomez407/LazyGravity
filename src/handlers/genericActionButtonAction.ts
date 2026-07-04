@@ -4,6 +4,7 @@ import { getCurrentCdp } from '../services/cdpBridgeManager';
 import { logger } from '../utils/logger';
 
 import type { WorkspaceCommandHandler } from '../commands/workspaceCommandHandler';
+import { buildClickScript } from '../services/approvalDetector';
 
 export interface GenericActionButtonActionDeps {
     readonly bridge: CdpBridge;
@@ -64,12 +65,18 @@ export function createGenericActionButtonAction(deps: GenericActionButtonActionD
                 return;
             }
 
-            // Inject the action text
-            logger.info(`[GenericActionButton] Clicking action button "${actionName}" via chat injection`);
-            const result = await cdp.injectMessage(actionName);
-            if (!result.ok) {
+            // Simulate DOM click instead of chat injection
+            logger.info(`[GenericActionButton] Clicking action button "${actionName}" via DOM script`);
+            const script = buildClickScript(actionName);
+            const evalResult = await cdp.call('Runtime.evaluate', {
+                expression: script,
+                returnByValue: true,
+            });
+
+            const resultValue = evalResult.result?.value;
+            if (!resultValue?.ok) {
                 await interaction.followUp({
-                    text: `Failed to execute action: ${result.error}`,
+                    text: `Failed to execute action: Button "${actionName}" not found or obscured.`,
                 }).catch(() => {});
                 return;
             }

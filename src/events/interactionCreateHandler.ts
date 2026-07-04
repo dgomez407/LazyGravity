@@ -273,9 +273,15 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                     }
                     
                     await interaction.deferUpdate();
-                    const result = await cdp.injectMessage(formattedName);
-                    if (!result.ok) {
-                        await interaction.followUp({ content: `Failed to execute action: ${result.error}`, flags: MessageFlags.Ephemeral });
+                    const script = buildClickScript(formattedName);
+                    const evalResult = await cdp.call('Runtime.evaluate', {
+                        expression: script,
+                        returnByValue: true,
+                    });
+                    
+                    const resultValue = evalResult.result?.value;
+                    if (!resultValue?.ok) {
+                        await interaction.followUp({ content: `Failed to execute action: Button "${formattedName}" not found or obscured.`, flags: MessageFlags.Ephemeral });
                     }
                     return;
                 }

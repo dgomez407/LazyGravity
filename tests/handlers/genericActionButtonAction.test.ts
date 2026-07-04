@@ -12,7 +12,7 @@ describe('genericActionButtonAction', () => {
 
     beforeEach(() => {
         mockCdp = {} as any;
-        mockCdp.injectMessage = jest.fn().mockResolvedValue({ ok: true });
+        mockCdp.call = jest.fn().mockResolvedValue({ result: { value: { ok: true } } });
 
         mockBridge = {} as any;
         (getCurrentCdp as jest.Mock).mockReturnValue(mockCdp);
@@ -30,7 +30,7 @@ describe('genericActionButtonAction', () => {
         expect(handler.match('other_btn')).toBe(null);
     });
 
-    it('injects formatted action name into CDP', async () => {
+    it('clicks formatted action button via DOM script', async () => {
         const mockWsHandler = { getWorkspaceForChannel: jest.fn() } as any;
         const handler = createGenericActionButtonAction({ bridge: mockBridge, wsHandler: mockWsHandler });
         const deferUpdate = jest.fn().mockResolvedValue(undefined);
@@ -45,7 +45,9 @@ describe('genericActionButtonAction', () => {
 
         expect(getCurrentCdp).toHaveBeenCalledWith(mockBridge);
         expect(deferUpdate).toHaveBeenCalled();
-        expect(mockCdp.injectMessage).toHaveBeenCalledWith('Review plan');
+        expect(mockCdp.call).toHaveBeenCalledWith('Runtime.evaluate', expect.objectContaining({
+            expression: expect.stringContaining('Review plan')
+        }));
     });
 
     it('shows error if CDP is not connected', async () => {
@@ -64,15 +66,15 @@ describe('genericActionButtonAction', () => {
             followUp,
         } as any, { actionName: 'Proceed' });
 
-        expect(mockCdp.injectMessage).not.toHaveBeenCalled();
+        expect(mockCdp.call).not.toHaveBeenCalled();
         expect(deferUpdate).toHaveBeenCalled();
         expect(followUp).toHaveBeenCalledWith(expect.objectContaining({
             text: expect.stringContaining('Not connected')
         }));
     });
 
-    it('shows error if injectMessage fails', async () => {
-        mockCdp.injectMessage = jest.fn().mockResolvedValue({ ok: false, error: 'DOM element not found' });
+    it('shows error if DOM script fails to find button', async () => {
+        mockCdp.call = jest.fn().mockResolvedValue({ result: { value: { ok: false } } });
         const mockWsHandler = { getWorkspaceForChannel: jest.fn() } as any;
         const handler = createGenericActionButtonAction({ bridge: mockBridge, wsHandler: mockWsHandler });
         const deferUpdate = jest.fn().mockResolvedValue(undefined);
@@ -88,9 +90,11 @@ describe('genericActionButtonAction', () => {
         } as any, { actionName: 'Proceed' });
 
         expect(deferUpdate).toHaveBeenCalled();
-        expect(mockCdp.injectMessage).toHaveBeenCalledWith('Proceed');
+        expect(mockCdp.call).toHaveBeenCalledWith('Runtime.evaluate', expect.objectContaining({
+            expression: expect.stringContaining('Proceed')
+        }));
         expect(followUp).toHaveBeenCalledWith(expect.objectContaining({
-            text: expect.stringContaining('DOM element not found')
+            text: expect.stringContaining('not found or obscured')
         }));
     });
 });

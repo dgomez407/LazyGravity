@@ -152,7 +152,7 @@ describe('interactionCreateHandler', () => {
     it('handles generic action_btn_ by injecting into CDP', async () => {
         const deferUpdate = jest.fn().mockResolvedValue(undefined);
         const cdp = {
-            injectMessage: jest.fn().mockResolvedValue({ ok: true }),
+            call: jest.fn().mockResolvedValue({ result: { value: { ok: true } } }),
         };
         const interaction = {
             isAutocomplete: () => false,
@@ -195,7 +195,9 @@ describe('interactionCreateHandler', () => {
         await handler(interaction);
 
         expect(deferUpdate).toHaveBeenCalled();
-        expect(cdp.injectMessage).toHaveBeenCalledWith('Proceed');
+        expect(cdp.call).toHaveBeenCalledWith('Runtime.evaluate', expect.objectContaining({
+            expression: expect.stringContaining('Proceed')
+        }));
     });
 
     it('handles account dropdown selection and persists global/channel account choice for non-session channels', async () => {

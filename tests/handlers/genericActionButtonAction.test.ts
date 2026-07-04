@@ -23,14 +23,16 @@ describe('genericActionButtonAction', () => {
     });
 
     it('matches customIds starting with action_btn_', () => {
-        const handler = createGenericActionButtonAction({ bridge: mockBridge });
+        const mockWsHandler = { getWorkspaceForChannel: jest.fn() } as any;
+        const handler = createGenericActionButtonAction({ bridge: mockBridge, wsHandler: mockWsHandler });
         expect(handler.match('action_btn_proceed')).toEqual({ actionName: 'Proceed' });
         expect(handler.match('action_btn_review_plan')).toEqual({ actionName: 'Review plan' });
         expect(handler.match('other_btn')).toBe(null);
     });
 
     it('injects formatted action name into CDP', async () => {
-        const handler = createGenericActionButtonAction({ bridge: mockBridge });
+        const mockWsHandler = { getWorkspaceForChannel: jest.fn() } as any;
+        const handler = createGenericActionButtonAction({ bridge: mockBridge, wsHandler: mockWsHandler });
         const deferUpdate = jest.fn().mockResolvedValue(undefined);
         
         await handler.execute({
@@ -48,7 +50,8 @@ describe('genericActionButtonAction', () => {
 
     it('shows error if CDP is not connected', async () => {
         (getCurrentCdp as jest.Mock).mockReturnValue(null);
-        const handler = createGenericActionButtonAction({ bridge: mockBridge });
+        const mockWsHandler = { getWorkspaceForChannel: jest.fn() } as any;
+        const handler = createGenericActionButtonAction({ bridge: mockBridge, wsHandler: mockWsHandler });
         const deferUpdate = jest.fn().mockResolvedValue(undefined);
         const followUp = jest.fn().mockResolvedValue(undefined);
         
@@ -70,7 +73,8 @@ describe('genericActionButtonAction', () => {
 
     it('shows error if injectMessage fails', async () => {
         mockCdp.injectMessage = jest.fn().mockResolvedValue({ ok: false, error: 'DOM element not found' });
-        const handler = createGenericActionButtonAction({ bridge: mockBridge });
+        const mockWsHandler = { getWorkspaceForChannel: jest.fn() } as any;
+        const handler = createGenericActionButtonAction({ bridge: mockBridge, wsHandler: mockWsHandler });
         const deferUpdate = jest.fn().mockResolvedValue(undefined);
         const followUp = jest.fn().mockResolvedValue(undefined);
         

@@ -3,11 +3,11 @@ import type { CdpBridge } from '../services/cdpBridgeManager';
 import { getCurrentCdp } from '../services/cdpBridgeManager';
 import { logger } from '../utils/logger';
 
-import type { WorkspaceChannelHandler } from '../services/workspaceChannelHandler';
+import type { WorkspaceCommandHandler } from '../commands/workspaceCommandHandler';
 
 export interface GenericActionButtonActionDeps {
     readonly bridge: CdpBridge;
-    readonly wsHandler: WorkspaceChannelHandler;
+    readonly wsHandler: WorkspaceCommandHandler;
 }
 
 /**
@@ -35,18 +35,17 @@ export function createGenericActionButtonAction(deps: GenericActionButtonActionD
         match(customId: string): Record<string, string> | null {
             const parsed = parseGenericActionCustomId(customId);
             if (!parsed) return null;
-            return { 
-                actionName: parsed.actionName,
-                projectName: parsed.projectName || '',
-                channelId: parsed.channelId || ''
-            };
+            const result: Record<string, string> = { actionName: parsed.actionName };
+            if (parsed.projectName) result.projectName = parsed.projectName;
+            if (parsed.channelId) result.channelId = parsed.channelId;
+            return result;
         },
 
         async execute(interaction, params): Promise<void> {
             const actionName = params.actionName;
-            const channelId = params.channelId || interaction.channel.id;
+            const channelId = params.channelId || interaction.channel?.id;
             
-            let projectName = params.projectName;
+            let projectName: string | undefined = params.projectName;
             if (!projectName && channelId) {
                 const workspacePath = deps.wsHandler.getWorkspaceForChannel(channelId);
                 projectName = workspacePath ? deps.bridge.pool.extractProjectName(workspacePath) : undefined;

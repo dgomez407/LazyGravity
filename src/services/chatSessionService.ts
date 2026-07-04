@@ -49,7 +49,9 @@ const GET_NEW_CHAT_BUTTON_SCRIPT = `(() => {
     const btn = document.querySelector('[data-tooltip-id="new-conversation-tooltip"]');
     if (!btn) return { found: false };
     const cursor = window.getComputedStyle(btn).cursor;
-    btn.scrollIntoView({ block: 'center' });
+    if (typeof btn.scrollIntoView === 'function') {
+        btn.scrollIntoView({ block: 'center', inline: 'nearest' });
+    }
     const rect = btn.getBoundingClientRect();
     return {
         found: true,
@@ -151,7 +153,9 @@ const GET_SESSION_VIEW_STATE_SCRIPT = `(() => {
 const FIND_PAST_CONVERSATIONS_BUTTON_SCRIPT = `(() => {
     const isVisible = (el) => !!el && el instanceof HTMLElement && el.offsetParent !== null;
     const getRect = (el) => {
-        el.scrollIntoView({ block: 'center' });
+        if (typeof el.scrollIntoView === 'function') {
+            el.scrollIntoView({ block: 'center', inline: 'nearest' });
+        }
         const rect = el.getBoundingClientRect();
         return { found: true, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
     };
@@ -262,7 +266,9 @@ const FIND_SHOW_MORE_BUTTON_SCRIPT = `(() => {
         if (!isVisible(el)) continue;
         const text = (el.textContent || '').trim();
         if (/^Show\\s+\\d+\\s+more/i.test(text)) {
-            el.scrollIntoView({ block: 'center' });
+            if (typeof el.scrollIntoView === 'function') {
+                el.scrollIntoView({ block: 'center', inline: 'nearest' });
+            }
             const rect = el.getBoundingClientRect();
             return { found: true, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
         }
@@ -320,7 +326,9 @@ function buildActivateChatByTitleScript(title: string): string {
         const target = pick(exact) || pick(includes) || pick(fuzzy);
         if (!target) return { ok: false, error: 'Chat title not found in side panel' };
         const clickable = target.closest('button, [role="button"], a, li, [data-testid*="conversation"]') || target;
-        clickable.scrollIntoView({ block: 'center' });
+        if (typeof clickable.scrollIntoView === 'function') {
+            clickable.scrollIntoView({ block: 'center', inline: 'nearest' });
+        }
         const rect = clickable.getBoundingClientRect();
         return {
             ok: true,
@@ -579,7 +587,9 @@ export function buildActivateViaPastConversationsScript(title: string): string {
                 return { ok: false, error: 'Conversation not found in Past Conversations' };
             }
             const clickable = getClickable(selectedOption) || selectedOption;
-            clickable.scrollIntoView({ block: 'center' });
+            if (typeof clickable.scrollIntoView === 'function') {
+                clickable.scrollIntoView({ block: 'center', inline: 'nearest' });
+            }
             const rect = clickable.getBoundingClientRect();
             return {
                 ok: true,

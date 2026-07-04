@@ -176,7 +176,7 @@ describe('interactionCreateHandler', () => {
             modeService: {} as any,
             modelService: {} as any,
             slashCommandHandler: {} as any,
-            wsHandler: {} as any,
+            wsHandler: { getWorkspaceForChannel: jest.fn() } as any,
             chatHandler: {} as any,
             client: {} as any,
             sendModeUI: jest.fn(),

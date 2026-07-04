@@ -49,7 +49,7 @@ function chunkText(text: string, limit = 4000): string[] {
  *
  * Handles chunking for large outputs and structured cards (plan, files, actions).
  */
-export function renderDiscordResponse(result: ClassifyResult): MessageCreateOptions {
+export function renderDiscordResponse(result: ClassifyResult, options?: { projectName?: string, channelId?: string }): MessageCreateOptions {
     const embeds: EmbedBuilder[] = [];
     const components: ActionRowBuilder<ButtonBuilder>[] = [];
 
@@ -140,8 +140,16 @@ export function renderDiscordResponse(result: ClassifyResult): MessageCreateOpti
         const row = new ActionRowBuilder<ButtonBuilder>();
         for (let i = 0; i < result.actionButtons.length && i < 5; i++) { // Max 5 buttons per row
             const btnText = result.actionButtons[i];
+            let customId = `action_btn_${btnText.toLowerCase().replace(/\s+/g, '_')}`;
+            if (options?.projectName && options?.channelId) {
+                const overhead = customId.length + 2 + options.channelId.length;
+                const safeProject = options.projectName.length > (100 - overhead)
+                    ? options.projectName.substring(0, 100 - overhead)
+                    : options.projectName;
+                customId = `${customId}:${safeProject}:${options.channelId}`;
+            }
             const btn = new ButtonBuilder()
-                .setCustomId(`action_btn_${btnText.toLowerCase().replace(/\s+/g, '_')}`)
+                .setCustomId(customId)
                 .setLabel(btnText)
                 .setStyle(
                     btnText.toLowerCase() === 'proceed' || btnText.toLowerCase() === 'open' 

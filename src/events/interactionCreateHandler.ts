@@ -249,10 +249,16 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
 
             try {
                 if (interaction.customId.startsWith('action_btn_')) {
-                    const actionName = interaction.customId.replace('action_btn_', '').replace(/_/g, ' ');
+                    const parts = interaction.customId.split(':');
+                    const actionName = parts[0].replace('action_btn_', '').replace(/_/g, ' ');
                     const formattedName = actionName.charAt(0).toUpperCase() + actionName.slice(1);
                     
-                    const cdp = await deps.getCurrentCdp(deps.bridge);
+                    const projectName = parts[1];
+                    const channelId = parts[2] || interaction.channelId;
+
+                    const cdp = projectName
+                        ? deps.bridge.pool.getConnected(projectName, resolveSelectedAccount(channelId, interaction.user.id))
+                        : await deps.getCurrentCdp(deps.bridge);
 
                     if (!cdp) {
                         await interaction.reply({ content: 'Not connected to CDP.', flags: MessageFlags.Ephemeral });
@@ -432,10 +438,36 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                                 }).catch(logger.error);
                             }
                         } else if (planningAction.action === 'reject') {
-                            await interaction.reply({
-                                content: t('Rejection of a plan is not allowed.'),
-                                flags: MessageFlags.Ephemeral,
-                            }).catch(logger.error);
+                            const clicked = await planDetector.clickRejectButton();
+                            
+                            const originalEmbed = interaction.message.embeds[0];
+                            const updatedEmbed = originalEmbed
+                                ? EmbedBuilder.from(originalEmbed)
+                                : new EmbedBuilder().setTitle('Planning Mode');
+                            const historyText = `Reject by <@${interaction.user.id}> (${new Date().toLocaleString('ja-JP')})`;
+                            updatedEmbed
+                                .setColor(clicked ? 0xE74C3C : 0x95A5A6)
+                                .addFields({ name: 'Action History', value: historyText, inline: false })
+                                .setTimestamp();
+
+                            try {
+                                await interaction.update({
+                                    embeds: [updatedEmbed],
+                                    components: disableAllButtons(interaction.message.components),
+                                });
+                            } catch (interactionError: any) {
+                                if (interactionError?.code === 10062 || interactionError?.code === 40060) {
+                                    logger.warn('[Planning] Interaction expired. Responding directly in the channel.');
+                                    if (interaction.channel && 'send' in interaction.channel) {
+                                        const fallbackMessage = clicked
+                                            ? t('Reject completed.')
+                                            : t('Reject button not found.');
+                                        await (interaction.channel as any).send(fallbackMessage).catch(logger.error);
+                                    }
+                                } else {
+                                    throw interactionError;
+                                }
+                            }
                             return;
                         } else {
                             // Proceed action

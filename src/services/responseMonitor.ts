@@ -1166,10 +1166,8 @@ export class ResponseMonitor {
                             this.emitNewProcessLogs(classified.activityLines);
                         }
                         
-                        if (classified.citedFiles && classified.citedFiles.length > 0) {
-                            this.currentCitedFiles = classified.citedFiles;
-                            this.currentFileChanges = classified.fileChangesTexts;
-                        }
+                        this.currentCitedFiles = classified.citedFiles || [];
+                        this.currentFileChanges = classified.fileChangesTexts || [];
                     } else if (!this.structuredDiagLogged) {
                         this.structuredDiagLogged = true;
                         logger.warn(

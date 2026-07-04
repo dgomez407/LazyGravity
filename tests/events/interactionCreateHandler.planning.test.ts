@@ -248,8 +248,8 @@ describe('interactionCreateHandler - planning buttons', () => {
         );
     });
 
-    it('handles Reject button: disallows rejection and replies with ephemeral warning', async () => {
-        const reply = jest.fn().mockResolvedValue(undefined);
+    it('handles Reject button: clicks reject in detector and updates embed', async () => {
+        const update = jest.fn().mockResolvedValue(undefined);
 
         const planDetector = {
             clickRejectButton: jest.fn().mockResolvedValue(true),
@@ -261,7 +261,7 @@ describe('interactionCreateHandler - planning buttons', () => {
             user: { id: 'allowed' },
             customId: 'planning_reject_action:ws-a:channel-a',
             channelId: 'channel-a',
-            reply,
+            update,
             channel: { send: jest.fn() },
             message: {
                 embeds: [{
@@ -313,11 +313,11 @@ describe('interactionCreateHandler - planning buttons', () => {
 
         await handler(interaction);
 
-        expect(planDetector.clickRejectButton).not.toHaveBeenCalled();
-        expect(reply).toHaveBeenCalledWith(
+        expect(planDetector.clickRejectButton).toHaveBeenCalled();
+        expect(update).toHaveBeenCalledWith(
             expect.objectContaining({
-                content: 'Rejection of a plan is not allowed.',
-                flags: expect.any(Number),
+                embeds: expect.any(Array),
+                components: expect.any(Array),
             }),
         );
     });

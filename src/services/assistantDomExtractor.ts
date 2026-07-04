@@ -164,8 +164,8 @@ export function classifyAssistantSegments(payload: unknown): ClassifyResult {
     const lastBody = bodyTexts.join('\n\n') || '';
     const finalOutputText = htmlToDiscordMarkdown(lastBody);
 
-    // Extract file:/// links from finalOutputText
-    const citedFiles: string[] = [];
+    // Extract file:/// links from finalOutputText and preserve citations from Pass 4
+    const citedFiles: string[] = Array.from(new Set([...citations]));
     const fileRegex = /\[.*?\]\((file:\/\/\/[^\)]+)\)/g;
     let match;
     while ((match = fileRegex.exec(finalOutputText)) !== null) {
@@ -282,6 +282,7 @@ export function extractAssistantSegmentsPayloadScript(): string {
     var segments = [];
     var seen = new Set();
     var bodyFound = false;
+    var latestMessageContainer = null;
 
     // Pass 1: Find assistant body — last non-excluded content node (recency first)
     var combinedSelector = selectors.join(', ');
@@ -362,6 +363,7 @@ export function extractAssistantSegmentsPayloadScript(): string {
                 domPath: 'article:nth(' + i + ')'
             });
             bodyFound = true;
+            latestMessageContainer = node.closest('[data-message-id], .message-row, [class*="message-container"]') || node.parentNode || scope;
             break; // Only capture the single latest assistant message
         }
     }
@@ -487,8 +489,9 @@ export function extractAssistantSegmentsPayloadScript(): string {
     }
 
     // Pass 4: Extract Antigravity 2.0 structured cards and artifacts
+    var artifactScope = latestMessageContainer || scope;
     // 4a. Plan Cards
-    var planNodes = scope.querySelectorAll('[data-testid="plan-card"], [class*="plan-summary"]');
+    var planNodes = artifactScope.querySelectorAll('[data-testid="plan-card"], [class*="plan-summary"]');
     for (var pi2 = 0; pi2 < planNodes.length; pi2++) {
         var pnode = planNodes[pi2];
         var ptext = (pnode.innerText || pnode.textContent || '').trim();
@@ -504,7 +507,7 @@ export function extractAssistantSegmentsPayloadScript(): string {
     }
 
     // 4b. Action Buttons (Open, Proceed, Review, etc.) - outside feedback footers
-    var actionBtns = scope.querySelectorAll('.actions-container button, [class*="action-btn"], .review-button, [class*="review-btn"]');
+    var actionBtns = artifactScope.querySelectorAll('.actions-container button, [class*="action-btn"], .review-button, [class*="review-btn"]');
     for (var abi = 0; abi < actionBtns.length; abi++) {
         var abtnText = (actionBtns[abi].textContent || '').trim();
         if (!abtnText) continue;
@@ -522,7 +525,7 @@ export function extractAssistantSegmentsPayloadScript(): string {
     }
 
     // 4c. File Edits
-    var fileEdits = scope.querySelectorAll('[class*="file-edit-item"], .file-edit-item, .bottom-full .cursor-pointer');
+    var fileEdits = artifactScope.querySelectorAll('[class*="file-edit-item"], .file-edit-item, .bottom-full .cursor-pointer');
     for (var fei = 0; fei < fileEdits.length; fei++) {
         var editNode = fileEdits[fei];
         if (seen.has(editNode)) continue;
@@ -554,7 +557,7 @@ export function extractAssistantSegmentsPayloadScript(): string {
     }
 
     // 4d. Citations
-    var citationNodes = scope.querySelectorAll('[class*="citation"], a[href^="file://"]');
+    var citationNodes = artifactScope.querySelectorAll('[class*="citation"], a[href^="file://"]');
     for (var cti = 0; cti < citationNodes.length; cti++) {
         var cnode = citationNodes[cti];
         var ctext = (cnode.getAttribute('href') || cnode.textContent || '').trim();
@@ -569,7 +572,7 @@ export function extractAssistantSegmentsPayloadScript(): string {
         }
     }
     // 4e. File Changes Text Blocks
-    var fcbNodes = scope.querySelectorAll('.file-changes-block code, [class*="file-changes"] code');
+    var fcbNodes = artifactScope.querySelectorAll('.file-changes-block code, [class*="file-changes"] code');
     for (var fci = 0; fci < fcbNodes.length; fci++) {
         var fcNode = fcbNodes[fci];
         var fcText = (fcNode.textContent || '').trim();

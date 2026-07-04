@@ -965,7 +965,10 @@ async function sendPromptToAntigravity(
 
                     const classified = monitor.getLastClassified();
                     if (options?.extractionMode === 'structured' && classified && outputFormat !== 'plain') {
-                        const messageOptions = renderDiscordResponse(classified);
+                        const messageOptions = renderDiscordResponse(classified, {
+                            projectName: cdp.getCurrentWorkspaceName() || 'unknown',
+                            channelId: message.channelId
+                        });
                         for (const msg of liveResponseMessages) {
                             if (msg) await msg.delete().catch(() => {});
                         }

@@ -250,13 +250,18 @@ export class ErrorPopupDetector {
                 const key = `${info.title}::${info.body.slice(0, 100)}`;
                 const now = Date.now();
                 const withinCooldown = (now - this.lastNotifiedAt) < ErrorPopupDetector.COOLDOWN_MS;
-                if (key !== this.lastDetectedKey && !withinCooldown) {
+                
+                if (key !== this.lastDetectedKey) {
                     this.lastNotifiedAt = now;
                     this.lastDetectedKey = key;
                     this.lastDetectedInfo = info;
                     this.onErrorPopup(info);
-                } else if (key === this.lastDetectedKey) {
-                    // Same key -- update stored info silently
+                } else if (!withinCooldown) {
+                    this.lastNotifiedAt = now;
+                    this.lastDetectedInfo = info;
+                    this.onErrorPopup(info);
+                } else {
+                    // Same key, within cooldown -- update stored info silently
                     this.lastDetectedInfo = info;
                 }
             } else {

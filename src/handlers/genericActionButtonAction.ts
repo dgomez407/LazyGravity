@@ -2,6 +2,7 @@ import type { ButtonAction } from './buttonHandler';
 import type { CdpBridge } from '../services/cdpBridgeManager';
 import { getCurrentCdp } from '../services/cdpBridgeManager';
 import { logger } from '../utils/logger';
+import { resolveProjectName } from '../utils/projectResolver';
 
 import type { WorkspaceCommandHandler } from '../commands/workspaceCommandHandler';
 import { buildClickScript } from '../services/approvalDetector';
@@ -45,18 +46,16 @@ export function createGenericActionButtonAction(deps: GenericActionButtonActionD
         async execute(interaction, params): Promise<void> {
             const actionName = params.actionName;
             const channelId = params.channelId || interaction.channel?.id;
-            
-            let projectName: string | undefined = params.projectName;
-            if (!projectName && channelId) {
-                const workspacePath = deps.wsHandler.getWorkspaceForChannel(channelId);
-                projectName = workspacePath ? deps.bridge.pool.extractProjectName(workspacePath) : undefined;
+            if (!channelId) {
+                return;
             }
+            const projectName = resolveProjectName(deps, channelId, params.projectName);
 
-            await interaction.deferUpdate();
+            await interaction.deferUpdate().catch(() => {});
 
             const cdp = projectName 
                 ? deps.bridge.pool.getConnected(projectName)
-                : getCurrentCdp(deps.bridge);
+                : null;
                 
             if (!cdp) {
                 await interaction.followUp({

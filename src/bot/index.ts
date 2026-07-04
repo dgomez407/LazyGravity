@@ -914,15 +914,27 @@ async function sendPromptToAntigravity(
                         for (let i = 0; i < Math.min(uniqueFiles.length, 5); i++) {
                             let fileUrl = uniqueFiles[i];
                             
+                            const wsPath = cdp.getCurrentWorkspacePath();
+                            if (!wsPath) {
+                                continue;
+                            }
+
                             if (!fileUrl.startsWith('file:///') && !path.isAbsolute(fileUrl)) {
-                                const wsPath = cdp.getCurrentWorkspacePath();
-                                if (wsPath) {
-                                    fileUrl = `file:///${path.resolve(wsPath, fileUrl).replace(/\\/g, '/')}`;
-                                }
+                                fileUrl = `file:///${path.resolve(wsPath, fileUrl).replace(/\\/g, '/')}`;
                             }
                             
-                            // Verify the file actually exists
-                            const fsPath = fileUrl.replace(/^file:\/\/\//, '');
+                            let fsPath = fileUrl.replace(/^file:\/\/\//, '');
+                            if (path.sep === '/' && !fsPath.startsWith('/')) {
+                                fsPath = '/' + fsPath;
+                            } else if (process.platform === 'win32' && fsPath.startsWith('/')) {
+                                fsPath = fsPath.substring(1);
+                            }
+
+                            const relative = path.relative(wsPath, fsPath);
+                            if (relative.startsWith('..') || path.isAbsolute(relative)) {
+                                continue;
+                            }
+
                             if (!fs.existsSync(fsPath)) {
                                 continue;
                             }
@@ -2490,13 +2502,14 @@ export async function handleSlashInteraction(
                 execFile(getAntigravityCliPath(), [resolvedPath], (error) => {
                     if (error) {
                         logger.error(`Failed to open file via CLI: ${error.message}`);
-                        interaction.editReply({ content: `❌ Error opening file via CLI: ${error.message}` }).catch(() => {});
+                        interaction.editReply({ content: `❌ Error opening file via CLI.` }).catch(() => {});
                     } else {
-                        interaction.editReply({ content: `✅ Opened file: **${resolvedPath}**` }).catch(() => {});
+                        interaction.editReply({ content: `✅ Opened file: **${path.basename(resolvedPath)}**` }).catch(() => {});
                     }
                 });
             } catch (e: any) {
-                await interaction.editReply({ content: `❌ Error opening file: ${e.message}` });
+                logger.error(`Failed to open file: ${e.message}`);
+                await interaction.editReply({ content: `❌ Error opening file.` });
             }
             break;
         }

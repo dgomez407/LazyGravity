@@ -395,6 +395,13 @@ describe('assistantDomExtractor', () => {
             
             // Should extract the absolute file path because of href
             expect(result.citations).toEqual(['file:///C:/Workspace/test.py']);
+            
+            // Should not extract toolbar buttons as actionButtons
+            expect(result.actionButtons).not.toContain('Reject all');
+            expect(result.actionButtons).not.toContain('Accept all');
+            
+            // Should not extract fileChanges just from the toolbar
+            expect(result.fileChanges).toEqual([]);
         });
 
         it('extracts fileChangesTexts correctly from a file-changes block', () => {

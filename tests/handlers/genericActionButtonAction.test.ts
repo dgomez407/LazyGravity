@@ -5,6 +5,9 @@ import { CdpService } from '../../src/services/cdpService';
 
 jest.mock('../../src/services/cdpBridgeManager');
 jest.mock('../../src/services/cdpService');
+jest.mock('../../src/utils/projectResolver', () => ({
+    resolveProjectName: jest.fn().mockReturnValue('mock-project'),
+}));
 
 describe('genericActionButtonAction', () => {
     let mockBridge: jest.Mocked<CdpBridge>;
@@ -14,8 +17,11 @@ describe('genericActionButtonAction', () => {
         mockCdp = {} as any;
         mockCdp.call = jest.fn().mockResolvedValue({ result: { value: { ok: true } } });
 
-        mockBridge = {} as any;
-        (getCurrentCdp as jest.Mock).mockReturnValue(mockCdp);
+        mockBridge = {
+            pool: {
+                getConnected: jest.fn().mockReturnValue(mockCdp),
+            }
+        } as any;
     });
 
     afterEach(() => {
@@ -38,12 +44,13 @@ describe('genericActionButtonAction', () => {
         await handler.execute({
             customId: 'action_btn_review_plan',
             channelId: 'ch-1',
+            channel: { id: 'ch-1' },
             userId: 'u-1',
             message: {} as any,
             deferUpdate,
         } as any, { actionName: 'Review plan' });
 
-        expect(getCurrentCdp).toHaveBeenCalledWith(mockBridge);
+        expect(mockBridge.pool.getConnected).toHaveBeenCalledWith('mock-project');
         expect(deferUpdate).toHaveBeenCalled();
         expect(mockCdp.call).toHaveBeenCalledWith('Runtime.evaluate', expect.objectContaining({
             expression: expect.stringContaining('Review plan')
@@ -51,7 +58,7 @@ describe('genericActionButtonAction', () => {
     });
 
     it('shows error if CDP is not connected', async () => {
-        (getCurrentCdp as jest.Mock).mockReturnValue(null);
+        mockBridge.pool.getConnected = jest.fn().mockReturnValue(null);
         const mockWsHandler = { getWorkspaceForChannel: jest.fn() } as any;
         const handler = createGenericActionButtonAction({ bridge: mockBridge, wsHandler: mockWsHandler });
         const deferUpdate = jest.fn().mockResolvedValue(undefined);
@@ -60,6 +67,7 @@ describe('genericActionButtonAction', () => {
         await handler.execute({
             customId: 'action_btn_proceed',
             channelId: 'ch-1',
+            channel: { id: 'ch-1' },
             userId: 'u-1',
             message: {} as any,
             deferUpdate,
@@ -83,6 +91,7 @@ describe('genericActionButtonAction', () => {
         await handler.execute({
             customId: 'action_btn_proceed',
             channelId: 'ch-1',
+            channel: { id: 'ch-1' },
             userId: 'u-1',
             message: {} as any,
             deferUpdate,

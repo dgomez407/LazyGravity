@@ -1,5 +1,5 @@
 export function parseQuestionCustomId(customId: string, expectedPrefix: string): { action: string; projectName?: string; channelId?: string } | null {
-    if (!customId.startsWith(expectedPrefix)) return null;
+    if (customId !== expectedPrefix && !customId.startsWith(expectedPrefix + ':')) return null;
 
     const parts = customId.split(':');
     const result: { action: string; projectName?: string; channelId?: string } = { action: parts[0] };

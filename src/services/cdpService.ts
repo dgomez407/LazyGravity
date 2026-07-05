@@ -451,6 +451,10 @@ export class CdpService extends EventEmitter {
         return this.currentWorkspaceName;
     }
 
+    getCurrentWorkspacePath(): string | null {
+        return this.currentWorkspacePath;
+    }
+
     /**
      * Discover and connect to the workbench page for the specified workspace.
      * Does nothing if already connected to the correct page.
@@ -712,11 +716,14 @@ export class CdpService extends EventEmitter {
 
                 const normalizedDetected = detectedValue.toLowerCase();
                 const normalizedProject = projectName.toLowerCase();
-                const normalizedWorkspace = workspacePath.toLowerCase();
+                const normalizedWorkspace = workspacePath.toLowerCase().replace(/\\/g, '/');
+                
+                const detectedParts = normalizedDetected.split(',').map((s) => s.trim());
 
                 if (
-                    normalizedDetected.includes(normalizedProject) ||
-                    normalizedDetected.includes(normalizedWorkspace)
+                    detectedParts.includes(normalizedProject) ||
+                    normalizedDetected.includes(normalizedWorkspace) ||
+                    normalizedDetected.replace(/\\/g, '/').includes(normalizedWorkspace)
                 ) {
                     this.currentWorkspaceName = projectName;
                     logger.debug(`[CdpService] Folder path match success: "${projectName}"`);
@@ -729,11 +736,22 @@ export class CdpService extends EventEmitter {
                 expression: 'window.location.href',
                 returnByValue: true,
             });
-            const pageUrl = (urlResult?.result?.value || '').toLowerCase();
-            const normalizedWorkspaceUri = encodeURIComponent(workspacePath).toLowerCase();
-            if (pageUrl.includes(normalizedWorkspaceUri) || pageUrl.includes(projectName.toLowerCase())) {
+            const pageUrl = decodeURIComponent(urlResult?.result?.value || '').toLowerCase().replace(/\\/g, '/');
+            const normalizedWorkspaceUri = workspacePath.toLowerCase().replace(/\\/g, '/');
+            
+            if (pageUrl.includes(normalizedWorkspaceUri)) {
                 this.currentWorkspaceName = projectName;
-                logger.debug(`[CdpService] URL parameter match success: "${projectName}"`);
+                logger.debug(`[CdpService] URL parameter match success: "${projectName}" (workspace URI)`);
+                return true;
+            }
+
+            // If we only have the project name to go on, make sure it's a discrete boundary in the URL path
+            // e.g. "folder=.../test" or "workspace=.../test". We prevent false positives like "latest" matching "test".
+            const safeProjectName = projectName.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const projectBoundaryRegex = new RegExp(`[=/]${safeProjectName}(?:$|&|\\?)`);
+            if (projectBoundaryRegex.test(pageUrl)) {
+                this.currentWorkspaceName = projectName;
+                logger.debug(`[CdpService] URL parameter match success: "${projectName}" (boundary regex)`);
                 return true;
             }
 

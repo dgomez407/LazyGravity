@@ -1,6 +1,5 @@
 import {
     ActionRowBuilder,
-    ButtonBuilder,
     ButtonInteraction,
     ChatInputCommandInteraction,
     EmbedBuilder,
@@ -9,9 +8,15 @@ import {
     MessageFlags,
 } from 'discord.js';
 
+import { execFile } from 'child_process';
+import path from 'path';
+import fs from 'fs';
+import { parseGenericActionCustomId } from '../handlers/genericActionButtonAction';
 import { t } from '../utils/i18n';
 import { logger } from '../utils/logger';
 import { disableAllButtons } from '../utils/discordButtonUtils';
+import { getAntigravityCliPath, getWorkspaceDirName } from '../utils/pathUtils';
+import { fileOpenCache } from '../utils/fileOpenCache';
 import { TEMPLATE_BTN_PREFIX, parseTemplateButtonId } from '../ui/templateUi';
 import {
     AUTOACCEPT_BTN_OFF,
@@ -23,6 +28,10 @@ import {
     OUTPUT_BTN_PLAIN,
     sendOutputUI,
 } from '../ui/outputUi';
+import { QUESTION_SELECT_ACTION_PREFIX, QUESTION_SKIP_ACTION_PREFIX } from '../services/notificationSender';
+import { createQuestionSelectAction } from '../handlers/questionSelectAction';
+import { createQuestionSkipAction } from '../handlers/questionSkipAction';
+import { wrapDiscordButton, wrapDiscordSelect } from '../platform/discord/wrappers';
 import { AccountPreferenceRepository } from '../database/accountPreferenceRepository';
 import { ChannelPreferenceRepository } from '../database/channelPreferenceRepository';
 import { UserPreferenceRepository, OutputFormat } from '../database/userPreferenceRepository';
@@ -42,12 +51,15 @@ import { CdpService } from '../services/cdpService';
 import { MODE_DISPLAY_NAMES, ModeService } from '../services/modeService';
 import { ModelService } from '../services/modelService';
 import { AutoAcceptService } from '../services/autoAcceptService';
+import { buildClickScript } from '../services/approvalDetector';
+import { RunCommandDetector } from '../services/runCommandDetector';
 import { ChatSessionService } from '../services/chatSessionService';
 import { JoinCommandHandler } from '../commands/joinCommandHandler';
 import { isSessionSelectId } from '../ui/sessionPickerUi';
 import { ARTIFACT_SELECT_ID, ARTIFACT_THREAD_BTN, ARTIFACT_INLINE_BTN, buildArtifactPickerUI, sendArtifactPickerUI } from '../ui/artifactsUi';
 import { ArtifactService } from '../services/artifactService';
 import { ArtifactThreadRepository } from '../database/artifactThreadRepository';
+import { ScheduleService } from '../services/scheduleService';
 import type { AntigravityAccountConfig } from '../utils/configLoader';
 import { inferParentScopeChannelId, listAccountNames, resolveScopedAccountName } from '../utils/accountUtils';
 import { ACCOUNT_SELECT_ID, sendAccountUI } from '../ui/accountUi';
@@ -74,7 +86,8 @@ export interface InteractionCreateHandlerDeps {
     handleScreenshot?: (...args: any[]) => Promise<void>;
     getCurrentCdp: (bridge: CdpBridge) => CdpService | null;
     parseApprovalCustomId: (customId: string) => { action: 'approve' | 'always_allow' | 'deny'; projectName: string | null; channelId: string | null } | null;
-    parsePlanningCustomId: (customId: string) => { action: 'open' | 'proceed'; projectName: string | null; channelId: string | null } | null;
+    parsePlanningCustomId: (customId: string) => { action: 'open' | 'proceed' | 'reject'; projectName: string | null; channelId: string | null } | null;
+    parseFileChangeCustomId: (customId: string) => { action: 'accept' | 'reject'; projectName: string | null; channelId: string | null } | null;
     parseErrorPopupCustomId: (customId: string) => { action: 'dismiss' | 'copy_debug' | 'retry'; projectName: string | null; channelId: string | null } | null;
     parseRunCommandCustomId: (customId: string) => { action: 'run' | 'reject'; projectName: string | null; channelId: string | null } | null;
     handleSlashInteraction: (
@@ -92,6 +105,7 @@ export interface InteractionCreateHandlerDeps {
         channelPrefRepo?: ChannelPreferenceRepository,
         antigravityAccounts?: AntigravityAccountConfig[],
         chatSessionRepo?: ChatSessionRepository,
+        scheduleService?: ScheduleService,
     ) => Promise<void>;
     handleTemplateUse?: (interaction: ButtonInteraction, templateId: number) => Promise<void>;
     joinHandler?: JoinCommandHandler;
@@ -103,6 +117,10 @@ export interface InteractionCreateHandlerDeps {
     chatSessionRepo?: ChatSessionRepository;
     chatSessionService?: ChatSessionService;
     artifactService?: ArtifactService;
+    scheduleService?: ScheduleService;
+    promptDispatcher?: import('../services/promptDispatcher').PromptDispatcher;
+    channelManager?: import('../services/channelManager').ChannelManager;
+    titleGenerator?: import('../services/titleGeneratorService').TitleGeneratorService;
 }
 
 export function createInteractionCreateHandler(deps: InteractionCreateHandlerDeps) {
@@ -127,24 +145,38 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
             accountPrefRepo: deps.accountPrefRepo,
             accounts: deps.antigravityAccounts,
         });
-    const getChannelCdp = (channelId: string, userId: string): CdpService | null =>
+    const resolveProjectFromChannel = (interaction: Interaction): string | null => {
+        if (!interaction.channelId) return null;
+        let workspacePath = deps.wsHandler.getWorkspaceForChannel(interaction.channelId);
+        if (!workspacePath) {
+            const parentId = getParentChannelId(interaction);
+            if (parentId) {
+                workspacePath = deps.wsHandler.getWorkspaceForChannel(parentId);
+            }
+        }
+        return workspacePath ? deps.bridge.pool.extractProjectName(workspacePath) : null;
+    };
+    const getChannelCdp = (interaction: Interaction): CdpService | null =>
         (() => {
-            const workspacePath = deps.wsHandler.getWorkspaceForChannel(channelId);
-            if (workspacePath) {
-                const projectName = deps.bridge.pool.extractProjectName(workspacePath);
+            if (!interaction.channelId) return null;
+            const projectName = resolveProjectFromChannel(interaction);
+            if (projectName) {
                 return deps.bridge.pool.getConnected(
                     projectName,
-                    resolveSelectedAccount(channelId, userId),
+                    resolveSelectedAccount(interaction.channelId, interaction.user.id, getParentChannelId(interaction)),
                 );
             }
 
-            return deps.bridge.lastActiveWorkspace
-                ? deps.bridge.pool.getConnected(
-                    deps.bridge.lastActiveWorkspace,
-                    resolveSelectedAccount(channelId, userId),
-                )
-                : null;
+            return null;
         })();
+    const buildResumeOptions = () => ({
+        chatSessionService: deps.chatSessionService!,
+        chatSessionRepo: deps.chatSessionRepo!,
+        channelManager: deps.channelManager as any,
+        titleGenerator: deps.titleGenerator as any,
+        userPrefRepo: deps.userPrefRepo,
+        artifactService: deps.artifactService,
+    });
     const ensureBoundSessionActive = async (
         channelId: string,
         userId: string,
@@ -233,6 +265,43 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
             }
 
             try {
+                const genericAction = parseGenericActionCustomId(interaction.customId);
+                if (genericAction) {
+                    const { actionName: formattedName, projectName: parsedProject, channelId } = genericAction;
+                    
+                    if (channelId && channelId !== interaction.channelId) {
+                        await interaction.reply({
+                            content: t('This action is linked to a different session channel.'),
+                            flags: MessageFlags.Ephemeral
+                        }).catch(logger.error);
+                        return;
+                    }
+
+                    const projectName = parsedProject ?? resolveProjectFromChannel(interaction);
+
+                    const cdp = projectName
+                        ? deps.bridge.pool.getConnected(projectName, resolveSelectedAccount(channelId || interaction.channelId, interaction.user.id, getParentChannelId(interaction)))
+                        : await deps.getCurrentCdp(deps.bridge);
+
+                    if (!cdp) {
+                        await interaction.reply({ content: 'Not connected to CDP.', flags: MessageFlags.Ephemeral });
+                        return;
+                    }
+                    
+                    await interaction.deferUpdate();
+                    const script = buildClickScript(formattedName);
+                    const evalResult = await cdp.call('Runtime.evaluate', {
+                        expression: script,
+                        returnByValue: true,
+                    });
+                    
+                    const resultValue = evalResult.result?.value;
+                    if (!resultValue?.ok) {
+                        await interaction.followUp({ content: `Failed to execute action: Button "${formattedName}" not found or obscured.`, flags: MessageFlags.Ephemeral });
+                    }
+                    return;
+                }
+
                 const approvalAction = deps.parseApprovalCustomId(interaction.customId);
                 if (approvalAction) {
                     if (approvalAction.channelId && approvalAction.channelId !== interaction.channelId) {
@@ -243,7 +312,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                         return;
                     }
 
-                    const projectName = approvalAction.projectName ?? deps.bridge.lastActiveWorkspace;
+                    const projectName = approvalAction.projectName ?? resolveProjectFromChannel(interaction);
                     const detector = projectName
                         ? deps.bridge.pool.getApprovalDetector(
                             projectName,
@@ -320,7 +389,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                         return;
                     }
 
-                    const planWorkspaceDirName = planningAction.projectName ?? deps.bridge.lastActiveWorkspace;
+                    const planWorkspaceDirName = planningAction.projectName ?? resolveProjectFromChannel(interaction);
                     const planDetector = planWorkspaceDirName
                         ? deps.bridge.pool.getPlanningDetector(
                             planWorkspaceDirName,
@@ -397,6 +466,38 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                                     flags: MessageFlags.Ephemeral,
                                 }).catch(logger.error);
                             }
+                        } else if (planningAction.action === 'reject') {
+                            const clicked = await planDetector.clickRejectButton();
+                            
+                            const originalEmbed = interaction.message.embeds[0];
+                            const updatedEmbed = originalEmbed
+                                ? EmbedBuilder.from(originalEmbed)
+                                : new EmbedBuilder().setTitle('Planning Mode');
+                            const historyText = `Reject by <@${interaction.user.id}> (${new Date().toLocaleString('ja-JP')})`;
+                            updatedEmbed
+                                .setColor(clicked ? 0xE74C3C : 0x95A5A6)
+                                .addFields({ name: 'Action History', value: historyText, inline: false })
+                                .setTimestamp();
+
+                            try {
+                                await interaction.update({
+                                    embeds: [updatedEmbed],
+                                    components: disableAllButtons(interaction.message.components),
+                                });
+                            } catch (interactionError: any) {
+                                if (interactionError?.code === 10062 || interactionError?.code === 40060) {
+                                    logger.warn('[Planning] Interaction expired. Responding directly in the channel.');
+                                    if (interaction.channel && 'send' in interaction.channel) {
+                                        const fallbackMessage = clicked
+                                            ? t('Reject completed.')
+                                            : t('Reject button not found.');
+                                        await (interaction.channel as any).send(fallbackMessage).catch(logger.error);
+                                    }
+                                } else {
+                                    throw interactionError;
+                                }
+                            }
+                            return;
                         } else {
                             // Proceed action
                             const clicked = await planDetector.clickProceedButton();
@@ -429,6 +530,19 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                                     throw interactionError;
                                 }
                             }
+                            
+                            if (clicked && deps.promptDispatcher && interaction.channelId && interaction.message) {
+                                const cdp = getChannelCdp(interaction);
+                                if (cdp) {
+                                    // Use 'as any' to bypass the type difference between Interaction's Message and Discord.js Message if needed
+                                    deps.promptDispatcher.resume({
+                                        message: interaction.message as any,
+                                        prompt: '',
+                                        cdp,
+                                        options: buildResumeOptions()
+                                    }).catch(e => logger.error('[Planning] Failed to resume monitoring:', e));
+                                }
+                            }
                         }
                     } catch (planError: any) {
                         if (planError?.code === 10062 || planError?.code === 40060) {
@@ -447,6 +561,87 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                     return;
                 }
 
+                // File Change handling
+                const fileChangeAction = deps.parseFileChangeCustomId(interaction.customId);
+                if (fileChangeAction) {
+                    if (fileChangeAction.channelId && fileChangeAction.channelId !== interaction.channelId) {
+                        await interaction.reply({
+                            content: t('This file change action is linked to a different session channel.'),
+                            flags: MessageFlags.Ephemeral,
+                        }).catch(logger.error);
+                        return;
+                    }
+                    const projectName = fileChangeAction.projectName ?? resolveProjectFromChannel(interaction);
+                    const cdp = projectName ? deps.bridge.pool.getConnected(projectName, resolveSelectedAccount(interaction.channelId, interaction.user.id, getParentChannelId(interaction))) : null;
+
+                    if (!cdp) {
+                        await interaction.reply({ content: t('Workspace CDP connection not found.'), flags: MessageFlags.Ephemeral }).catch(logger.error);
+                        return;
+                    }
+
+                    let clicked = false;
+                    try {
+                        await interaction.deferUpdate();
+                        
+                        const actionLabelEval = fileChangeAction.action === 'accept' ? 'Accept all' : 'Reject all';
+                        const script = buildClickScript(actionLabelEval);
+                        const contextId = cdp.getPrimaryContextId();
+                        const callParams: Record<string, unknown> = {
+                            expression: script,
+                            returnByValue: true,
+                        };
+                        if (contextId !== null) callParams.contextId = contextId;
+                        const res = await cdp.call('Runtime.evaluate', callParams);
+                        clicked = res?.result?.value?.ok === true;
+                        
+                        const originalEmbed = interaction.message.embeds[0];
+                        const updatedEmbed = originalEmbed
+                            ? EmbedBuilder.from(originalEmbed)
+                            : new EmbedBuilder().setTitle('File Changes');
+                        
+                        const actionLabel = fileChangeAction.action === 'accept' ? 'Accept All' : 'Reject All';
+                        const historyText = `${actionLabel} by <@${interaction.user.id}> (${new Date().toLocaleString('ja-JP')})`;
+                        
+                        updatedEmbed
+                            .setColor(clicked ? (fileChangeAction.action === 'accept' ? 0x2ECC71 : 0xE74C3C) : 0x95A5A6)
+                            .addFields({ name: 'Action History', value: historyText, inline: false })
+                            .setTimestamp();
+                        
+                        await interaction.editReply({
+                            embeds: [updatedEmbed],
+                            components: disableAllButtons(interaction.message.components),
+                        });
+                        
+                        if (clicked && deps.promptDispatcher && interaction.channelId && interaction.message) {
+                            // Resume monitoring, treating the completion of file changes as a need to poll again
+                            deps.promptDispatcher.resume({
+                                message: interaction.message as any,
+                                prompt: '',
+                                cdp,
+                                options: buildResumeOptions()
+                            }).catch(e => logger.error('[FileChange] Failed to resume monitoring:', e));
+                        }
+                    } catch (err: any) {
+                        if (err?.code === 10062 || err?.code === 40060) {
+                            logger.warn('[FileChange] Interaction expired. Responding directly in the channel.');
+                            if (interaction.channel && 'send' in interaction.channel) {
+                                const actionLabel = fileChangeAction.action === 'accept' ? 'Accept All' : 'Reject All';
+                                const fallbackMessage = clicked
+                                    ? `${actionLabel} completed.`
+                                    : t('File change button not found or error occurred.');
+                                await (interaction.channel as any).send(fallbackMessage).catch(logger.error);
+                            }
+                        } else {
+                            logger.error('[FileChange] action error:', err);
+                            await interaction.followUp({
+                                content: `❌ Error executing file change action: ${err.message || 'Unknown error'}`,
+                                flags: MessageFlags.Ephemeral
+                            }).catch(() => {});
+                        }
+                    }
+                    return;
+                }
+
                 const errorPopupAction = deps.parseErrorPopupCustomId(interaction.customId);
                 if (errorPopupAction) {
                     if (errorPopupAction.channelId && errorPopupAction.channelId !== interaction.channelId) {
@@ -457,7 +652,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                         return;
                     }
 
-                    const errorWorkspaceDirName = errorPopupAction.projectName ?? deps.bridge.lastActiveWorkspace;
+                    const errorWorkspaceDirName = errorPopupAction.projectName ?? resolveProjectFromChannel(interaction);
                     const errorDetector = errorWorkspaceDirName
                         ? deps.bridge.pool.getErrorPopupDetector(
                             errorWorkspaceDirName,
@@ -614,7 +809,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                         return;
                     }
 
-                    const runCmdWorkspace = runCommandAction.projectName ?? deps.bridge.lastActiveWorkspace;
+                    const runCmdWorkspace = runCommandAction.projectName ?? resolveProjectFromChannel(interaction);
                     const runCmdDetector = runCmdWorkspace
                         ? deps.bridge.pool.getRunCommandDetector(
                             runCmdWorkspace,
@@ -689,7 +884,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
 
                 if (interaction.customId === 'model_set_default_btn') {
                     await interaction.deferUpdate();
-                    const cdp = getChannelCdp(interaction.channelId, interaction.user.id);
+                    const cdp = getChannelCdp(interaction);
                     if (!cdp) {
                         await interaction.followUp({ content: 'Not connected to CDP.', flags: MessageFlags.Ephemeral });
                         return;
@@ -711,7 +906,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                     await deps.sendModelsUI(
                         { editReply: async (data: any) => await interaction.editReply(data) },
                         {
-                            getCurrentCdp: () => getChannelCdp(interaction.channelId, interaction.user.id),
+                            getCurrentCdp: () => getChannelCdp(interaction),
                             fetchQuota: async () => deps.bridge.quota.fetchQuota(),
                         },
                     );
@@ -721,7 +916,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
 
                 if (interaction.customId === 'model_clear_default_btn') {
                     await interaction.deferUpdate();
-                    const cdp = getChannelCdp(interaction.channelId, interaction.user.id);
+                    const cdp = getChannelCdp(interaction);
                     if (cdp) {
                         const sessionReady = await ensureBoundSessionActive(interaction.channelId, interaction.user.id, cdp);
                         if (!sessionReady.ok) {
@@ -736,7 +931,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                     await deps.sendModelsUI(
                         { editReply: async (data: any) => await interaction.editReply(data) },
                         {
-                            getCurrentCdp: () => getChannelCdp(interaction.channelId, interaction.user.id),
+                            getCurrentCdp: () => getChannelCdp(interaction),
                             fetchQuota: async () => deps.bridge.quota.fetchQuota(),
                         },
                     );
@@ -746,7 +941,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
 
                 if (interaction.customId === 'model_refresh_btn') {
                     await interaction.deferUpdate();
-                    const cdp = getChannelCdp(interaction.channelId, interaction.user.id);
+                    const cdp = getChannelCdp(interaction);
                     if (cdp) {
                         const sessionReady = await ensureBoundSessionActive(interaction.channelId, interaction.user.id, cdp);
                         if (!sessionReady.ok) {
@@ -757,7 +952,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                     await deps.sendModelsUI(
                         { editReply: async (data: any) => await interaction.editReply(data) },
                         {
-                            getCurrentCdp: () => getChannelCdp(interaction.channelId, interaction.user.id),
+                            getCurrentCdp: () => getChannelCdp(interaction),
                             fetchQuota: async () => deps.bridge.quota.fetchQuota(),
                         },
                     );
@@ -768,7 +963,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                     await interaction.deferUpdate();
 
                     const modelName = interaction.customId.replace('model_btn_', '');
-                    const cdp = getChannelCdp(interaction.channelId, interaction.user.id);
+                    const cdp = getChannelCdp(interaction);
 
                     if (!cdp) {
                         await interaction.followUp({ content: 'Not connected to CDP.', flags: MessageFlags.Ephemeral });
@@ -788,7 +983,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                         await deps.sendModelsUI(
                             { editReply: async (data: any) => await interaction.editReply(data) },
                             {
-                                getCurrentCdp: () => getChannelCdp(interaction.channelId, interaction.user.id),
+                                getCurrentCdp: () => getChannelCdp(interaction),
                                 fetchQuota: async () => deps.bridge.quota.fetchQuota(),
                             },
                         );
@@ -876,6 +1071,90 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                     }, true, passedConvId);
                     return;
                 }
+
+                if (interaction.customId.startsWith('file_open:')) {
+                    await interaction.deferUpdate().catch(() => {});
+                    const hashId = interaction.customId.replace('file_open:', '');
+                    const fileUrl = fileOpenCache.get(hashId);
+                    if (!fileUrl) {
+                        await interaction.followUp({
+                            content: t('File URL not found in cache or expired.'),
+                            flags: MessageFlags.Ephemeral
+                        }).catch(logger.error);
+                        return;
+                    }
+
+                    let resolvedPath = fileUrl;
+                    if (fileUrl.startsWith('file:///')) {
+                        let rawPath = fileUrl.replace(/^file:\/\/\//, '');
+                        if (path.sep === '/' && !rawPath.startsWith('/')) {
+                            rawPath = '/' + rawPath;
+                        } else if (process.platform === 'win32' && rawPath.startsWith('/')) {
+                            rawPath = rawPath.substring(1);
+                        }
+                        resolvedPath = path.resolve(rawPath);
+                    }
+
+                    let workspacePath: string | undefined = undefined;
+                    if (interaction.channelId) {
+                        workspacePath = deps.wsHandler.getWorkspaceForChannel(interaction.channelId) || 
+                            deps.chatSessionRepo?.findByChannelId(interaction.channelId)?.workspacePath;
+                    }
+
+                    if (!workspacePath) {
+                        await interaction.followUp({
+                            content: `❌ Error: Cannot open files without an active workspace.`,
+                            flags: MessageFlags.Ephemeral
+                        }).catch(logger.error);
+                        return;
+                    }
+
+                    const relative = path.relative(workspacePath, resolvedPath);
+                    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+                        await interaction.followUp({
+                            content: `❌ Error: Cannot open files outside the workspace root.`,
+                            flags: MessageFlags.Ephemeral
+                        }).catch(logger.error);
+                        return;
+                    }
+
+                    try {
+                        const fileContent = fs.readFileSync(resolvedPath, 'utf8');
+                        const MAX_DESC_LEN = 4096;
+                        const truncated = fileContent.length > MAX_DESC_LEN
+                            ? fileContent.substring(0, MAX_DESC_LEN - 15) + '\n\n(truncated)'
+                            : fileContent;
+                        
+                        const embed = new EmbedBuilder()
+                            .setTitle(`Opened: ${path.basename(resolvedPath)}`)
+                            .setDescription(truncated)
+                            .setColor(0x3498DB)
+                            .setTimestamp();
+
+                        execFile(getAntigravityCliPath(), [resolvedPath], async (error) => {
+                            if (error) {
+                                logger.error(`Failed to open file via CLI: ${error.message}`);
+                                await interaction.followUp({
+                                    content: `❌ Error opening file via CLI: ${error.message}`,
+                                    flags: MessageFlags.Ephemeral
+                                }).catch(() => {});
+                            } else {
+                                await interaction.followUp({
+                                    content: `✅ Opened file in IDE: **${path.basename(resolvedPath)}**`,
+                                    embeds: [embed],
+                                    flags: MessageFlags.Ephemeral
+                                }).catch(() => {});
+                            }
+                        });
+                    } catch (e: any) {
+                        await interaction.followUp({
+                            content: `❌ Error opening file: ${e.message}`,
+                            flags: MessageFlags.Ephemeral
+                        }).catch(logger.error);
+                    }
+                    return;
+                }
+
             } catch (error) {
                 logger.error('Error during button interaction handling:', error);
 
@@ -913,7 +1192,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
 
                 deps.modeService.setMode(selectedMode);
 
-                const cdp = getChannelCdp(interaction.channelId, interaction.user.id);
+                const cdp = getChannelCdp(interaction);
                 if (cdp) {
                     const res = await cdp.setUiMode(selectedMode);
                     if (!res.ok) {
@@ -928,6 +1207,8 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                 try {
                     if (interaction.deferred || interaction.replied) {
                         await interaction.followUp({ content: 'An error occurred while changing the mode.', flags: MessageFlags.Ephemeral }).catch(logger.error);
+                    } else {
+                        await interaction.reply({ content: 'An error occurred while changing the mode.', flags: MessageFlags.Ephemeral }).catch(logger.error);
                     }
                 } catch (e) {
                     logger.error('Failed to send error message:', e);
@@ -1072,9 +1353,10 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
 
                 // Resolve the selected artifact by rescanning and matching the encoded value
                 const channelId = (interaction as any).channelId as string;
-                const sessionTitle = deps.chatSessionRepo?.findByChannelId(channelId)?.displayName?.trim() ?? '';
-                let conversationId = sessionTitle ? artifactService.findConversationByTitle(sessionTitle) : null;
-                if (!conversationId) conversationId = artifactService.getLatestConversationWithArtifacts();
+                const session = deps.chatSessionRepo?.findByChannelId(channelId);
+                const sessionTitle = session?.displayName?.trim() ?? '';
+                const workspaceDirName = getWorkspaceDirName(session);
+                const conversationId = session?.conversationId || (sessionTitle ? artifactService.findConversationByTitle(sessionTitle, workspaceDirName) : null);
 
                 if (!conversationId) {
                     await interaction.editReply({ content: '📂 No artifacts found.', components: [], allowedMentions: { parse: [] } }).catch(logger.error);
@@ -1191,6 +1473,38 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
             return;
         }
 
+        if (interaction.isStringSelectMenu() && interaction.customId.startsWith(QUESTION_SELECT_ACTION_PREFIX)) {
+            try {
+                const action = createQuestionSelectAction({ bridge: deps.bridge, wsHandler: deps.wsHandler });
+                const wrapped = wrapDiscordSelect(interaction as any);
+                await action.execute(wrapped, interaction.values);
+            } catch (err: unknown) {
+                logger.error('[QuestionSelectAction] Error executing action:', err);
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({ content: 'An error occurred.', ephemeral: true }).catch(logger.error);
+                } else {
+                    await interaction.followUp({ content: 'An error occurred.', ephemeral: true }).catch(logger.error);
+                }
+            }
+            return;
+        }
+
+        if (interaction.isButton() && interaction.customId.startsWith(QUESTION_SKIP_ACTION_PREFIX)) {
+            try {
+                const action = createQuestionSkipAction({ bridge: deps.bridge, wsHandler: deps.wsHandler });
+                const wrapped = wrapDiscordButton(interaction as any);
+                await action.execute(wrapped, {});
+            } catch (err: unknown) {
+                logger.error('[QuestionSkipAction] Error executing action:', err);
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({ content: 'An error occurred.', ephemeral: true }).catch(logger.error);
+                } else {
+                    await interaction.followUp({ content: 'An error occurred.', ephemeral: true }).catch(logger.error);
+                }
+            }
+            return;
+        }
+
         if (interaction.isStringSelectMenu() && isProjectSelectId(interaction.customId)) {
             if (!deps.config.allowedUserIds.includes(interaction.user.id)) {
                 await interaction.reply({ content: t('You do not have permission.'), flags: MessageFlags.Ephemeral }).catch(logger.error);
@@ -1253,6 +1567,7 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                 deps.channelPrefRepo,
                 deps.antigravityAccounts,
                 deps.chatSessionRepo,
+                deps.scheduleService,
             );
         } catch (error) {
             logger.error(

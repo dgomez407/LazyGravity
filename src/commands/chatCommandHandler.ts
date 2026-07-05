@@ -99,9 +99,36 @@ export class ChatCommandHandler {
             return;
         }
 
+        // Start a new chat in the IDE
+        const newChatResult = await this.chatSessionService.startNewChat(workspaceCdp);
+        if (!newChatResult.ok) {
+            // Log but don't fail the command, as the channel still needs to be created
+            // and the user might just have to click it manually if the IDE state is strange.
+            import('../utils/logger').then(({ logger }) => {
+                logger.warn(`[/new] Could not start new chat in IDE automatically: ${newChatResult.error}`);
+            });
+        }
+
+        const customNameRaw = interaction.options.getString('name');
+        
+        let safeCustomName: string | null = null;
+        if (customNameRaw) {
+            // Import TitleGeneratorService to sanitize the channel name if needed,
+            // or just do basic sanitization inline.
+            safeCustomName = customNameRaw
+                .toLowerCase()
+                .replace(/\s+/g, '-')
+                .replace(/[^a-z0-9\-_\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uff9f\u4e00-\u9faf]/g, '-')
+                .replace(/-{2,}/g, '-')
+                .replace(/^-+|-+$/g, '')
+                .substring(0, 80);
+            
+            if (!safeCustomName) safeCustomName = null;
+        }
+
         // Create a new session channel
         const sessionNumber = this.chatSessionRepo.getNextSessionNumber(parentId);
-        const channelName = `session-${sessionNumber}`;
+        const channelName = safeCustomName ? `${sessionNumber}-${safeCustomName}` : `session-${sessionNumber}`;
         const sessionResult = await this.channelManager.createSessionChannel(guild, parentId, channelName);
         const newChannelId = sessionResult.channelId;
 
@@ -120,6 +147,21 @@ export class ChatCommandHandler {
             activeAccountName: selectedAccount,
             guildId: guild.id,
         });
+        
+        if (safeCustomName) {
+            // Set the display name and mark it as renamed so autoRenameChannel skips it
+            this.chatSessionRepo.updateDisplayName(newChannelId, safeCustomName);
+            
+            // Try to make the IDE's DOM match the Discord channel
+            if (workspaceCdp) {
+                const renameResult = await this.chatSessionService.renameCurrentChatInUI(workspaceCdp, safeCustomName);
+                if (!renameResult.ok) {
+                    import('../utils/logger').then(({ logger }) => {
+                        logger.warn(`[/new] Could not rename chat in IDE automatically: ${renameResult.error}`);
+                    });
+                }
+            }
+        }
 
         const embed = new EmbedBuilder()
             .setTitle(t('💬 Started a new session'))

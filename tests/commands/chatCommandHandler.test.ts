@@ -20,7 +20,8 @@ describe('ChatCommandHandler', () => {
 
     beforeEach(() => {
         mockService = {
-            startNewChat: jest.fn(),
+            startNewChat: jest.fn().mockResolvedValue({ ok: true }),
+            renameCurrentChatInUI: jest.fn().mockResolvedValue({ ok: true }),
             getCurrentSessionInfo: jest.fn(),
         } as any;
 
@@ -142,6 +143,7 @@ describe('ChatCommandHandler', () => {
                 channel: { type: 0, parentId: 'cat-1' },
                 channelId: 'ch-1',
                 user: { id: 'user-1' },
+                options: { getString: jest.fn().mockReturnValue(null) },
                 editReply: jest.fn().mockResolvedValue(undefined),
             };
 
@@ -192,6 +194,7 @@ describe('ChatCommandHandler', () => {
                 channel: { type: 0, parentId: 'cat-1' },
                 channelId: 'ch-1',
                 user: { id: 'user-1' },
+                options: { getString: jest.fn().mockReturnValue(null) },
                 editReply: jest.fn().mockResolvedValue(undefined),
             };
 
@@ -199,6 +202,93 @@ describe('ChatCommandHandler', () => {
 
             // Session channel is still created even if startNewChat fails
             expect(mockGuild.channels.create).toHaveBeenCalled();
+        });
+
+        it('renames the session channel when a name option is provided and successful', async () => {
+            chatSessionRepo.create({
+                channelId: 'ch-1', categoryId: 'cat-1', workspacePath: 'my-proj',
+                sessionNumber: 1, guildId: 'guild-1',
+            });
+            bindingRepo.upsert({ channelId: 'ch-1', workspacePath: 'my-proj', guildId: 'guild-1' });
+
+            const mockCdp = {
+                isConnected: jest.fn().mockReturnValue(true),
+                getPrimaryContextId: jest.fn().mockReturnValue(1),
+                call: jest.fn(),
+                discoverAndConnectForWorkspace: jest.fn().mockResolvedValue(true),
+            };
+            mockPool.getOrConnect.mockResolvedValue(mockCdp as any);
+            mockService.startNewChat.mockResolvedValue({ ok: true });
+            mockService.renameCurrentChatInUI.mockResolvedValue({ ok: true });
+
+            const mockChannelSetName = jest.fn().mockResolvedValue(undefined);
+            const mockGuild = {
+                id: 'guild-1',
+                channels: {
+                    cache: { get: jest.fn().mockReturnValue(undefined) },
+                    create: jest.fn().mockResolvedValue({ id: 'new-ch-2', name: 'session-2', setName: mockChannelSetName }),
+                },
+            };
+
+            const interaction = {
+                guild: mockGuild,
+                channel: { type: 0, parentId: 'cat-1' },
+                channelId: 'ch-1',
+                user: { id: 'user-1' },
+                options: { getString: jest.fn().mockImplementation((opt) => opt === 'name' ? 'custom-name' : null) },
+                editReply: jest.fn().mockResolvedValue(undefined),
+            };
+
+            await handler.handleNew(interaction as any);
+
+            expect(mockService.renameCurrentChatInUI).toHaveBeenCalledWith(mockCdp, 'custom-name');
+            expect(mockGuild.channels.create).toHaveBeenCalledWith(
+                expect.objectContaining({ name: '2-custom-name', parent: 'cat-1' })
+            );
+        });
+
+        it('does not crash if renaming the session channel fails', async () => {
+            chatSessionRepo.create({
+                channelId: 'ch-1', categoryId: 'cat-1', workspacePath: 'my-proj',
+                sessionNumber: 1, guildId: 'guild-1',
+            });
+            bindingRepo.upsert({ channelId: 'ch-1', workspacePath: 'my-proj', guildId: 'guild-1' });
+
+            const mockCdp = {
+                isConnected: jest.fn().mockReturnValue(true),
+                getPrimaryContextId: jest.fn().mockReturnValue(1),
+                call: jest.fn(),
+                discoverAndConnectForWorkspace: jest.fn().mockResolvedValue(true),
+            };
+            mockPool.getOrConnect.mockResolvedValue(mockCdp as any);
+            mockService.startNewChat.mockResolvedValue({ ok: true });
+            mockService.renameCurrentChatInUI.mockResolvedValue({ ok: false, error: 'UI failure' });
+
+            const mockChannelSetName = jest.fn().mockRejectedValue(new Error('Discord API failure'));
+            const mockGuild = {
+                id: 'guild-1',
+                channels: {
+                    cache: { get: jest.fn().mockReturnValue(undefined) },
+                    create: jest.fn().mockResolvedValue({ id: 'new-ch-2', name: 'session-2', setName: mockChannelSetName }),
+                },
+            };
+
+            const interaction = {
+                guild: mockGuild,
+                channel: { type: 0, parentId: 'cat-1' },
+                channelId: 'ch-1',
+                user: { id: 'user-1' },
+                options: { getString: jest.fn().mockImplementation((opt) => opt === 'name' ? 'custom-name' : null) },
+                editReply: jest.fn().mockResolvedValue(undefined),
+            };
+
+            await handler.handleNew(interaction as any);
+
+            // Should still complete without throwing an unhandled rejection
+            expect(mockService.renameCurrentChatInUI).toHaveBeenCalledWith(mockCdp, 'custom-name');
+            expect(mockGuild.channels.create).toHaveBeenCalledWith(
+                expect.objectContaining({ name: '2-custom-name', parent: 'cat-1' })
+            );
         });
 
         it('returns an error when the pool is not initialized', async () => {
@@ -220,6 +310,7 @@ describe('ChatCommandHandler', () => {
                 channel: { type: 0, parentId: 'cat-1' },
                 channelId: 'ch-1',
                 user: { id: 'user-1' },
+                options: { getString: jest.fn().mockReturnValue(null) },
                 editReply: jest.fn().mockResolvedValue(undefined),
             };
 
@@ -261,6 +352,7 @@ describe('ChatCommandHandler', () => {
                 channel: { type: 0, parentId: null },
                 channelId: 'ch-1',
                 user: { id: 'user-1' },
+                options: { getString: jest.fn().mockReturnValue(null) },
                 editReply: jest.fn().mockResolvedValue(undefined),
             };
 

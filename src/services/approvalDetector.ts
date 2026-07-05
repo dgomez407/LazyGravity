@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger';
+import { ConsecutiveEmptyPollGate } from '../utils/consecutiveEmptyPollGate';
 import { CdpService } from './cdpService';
 
 /** Approval button information */
@@ -30,20 +31,21 @@ export interface ApprovalDetectorOptions {
  * Detects allow/deny button pairs and extracts descriptions with fallbacks.
  */
 const DETECT_APPROVAL_SCRIPT = `(() => {
-    const ALLOW_ONCE_PATTERNS = ['allow once', 'allow one time', '今回のみ許可', '1回のみ許可', '一度許可'];
+    const ALLOW_ONCE_PATTERNS = ['allow once', 'allow one time', 'yes, allow this time', '今回のみ許可', '1回のみ許可', '一度許可'];
     const ALWAYS_ALLOW_PATTERNS = [
         'allow this conversation',
         'allow this chat',
         'always allow',
+        'yes, and always allow',
         '常に許可',
         'この会話を許可',
     ];
-    const ALLOW_PATTERNS = ['allow', 'permit', '許可', '承認', '確認'];
-    const DENY_PATTERNS = ['deny', '拒否', 'decline'];
+    const ALLOW_PATTERNS = ['allow', 'permit', 'accept', 'approve', '許可', '承認', '確認'];
+    const DENY_PATTERNS = ['deny', 'reject', '拒否', 'decline', 'no (tell the agent'];
 
     const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
 
-    const allButtons = Array.from(document.querySelectorAll('button'))
+    const allButtons = Array.from(document.querySelectorAll('button, [role="button"], span.cursor-pointer, div.cursor-pointer'))
         .filter(btn => btn.offsetParent !== null);
 
     let approveBtn = allButtons.find(btn => {
@@ -66,7 +68,7 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
         || approveBtn.parentElement
         || document.body;
 
-    const containerButtons = Array.from(container.querySelectorAll('button'))
+    const containerButtons = Array.from(container.querySelectorAll('button, [role="button"], span.cursor-pointer, div.cursor-pointer'))
         .filter(btn => btn.offsetParent !== null);
 
     const denyBtn = containerButtons.find(btn => {
@@ -99,14 +101,48 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
 
     // 2. Parent element text (excluding button text)
     if (!description) {
-        const parent = approveBtn.parentElement?.parentElement || approveBtn.parentElement;
-        if (parent) {
-            const clone = parent.cloneNode(true);
-            const buttons = clone.querySelectorAll('button');
-            buttons.forEach(b => b.remove());
-            const parentText = (clone.textContent || '').trim();
-            if (parentText.length > 5 && parentText.length < 500) {
-                description = parentText;
+        let modal = approveBtn.closest('.notify-user-container, [role="dialog"], .modal, .dialog, .approval-container, .permission-dialog');
+        
+        if (!modal) {
+            // New Antigravity IDE uses a sticky footer with no identifying modal classes.
+            // Traverse up until we find a container that includes the file list popup (.bottom-full)
+            let p = approveBtn.parentElement;
+            while (p && p.tagName !== 'BODY') {
+                if (p.querySelector('.bottom-full')) {
+                    modal = p;
+                    break;
+                }
+                p = p.parentElement;
+            }
+            if (!modal) {
+                modal = approveBtn.parentElement?.parentElement?.parentElement || approveBtn.parentElement?.parentElement;
+            }
+        }
+
+        if (modal) {
+            const parts = [];
+            const walk = (node) => {
+                if (node.nodeType === 1) {
+                    // Skip buttons entirely
+                    if (node.tagName === 'BUTTON' || node.getAttribute('role') === 'button' || node.classList.contains('cursor-pointer')) return;
+                    
+                    const display = window.getComputedStyle(node).display;
+                    if (display === 'none') return;
+                    
+                    const isBlock = display === 'block' || display === 'flex' || node.tagName === 'DIV' || node.tagName === 'LI';
+                    if (isBlock && parts.length > 0 && parts[parts.length - 1] !== '\\n') parts.push('\\n');
+                    for (const child of node.childNodes) walk(child);
+                    if (isBlock && parts.length > 0 && parts[parts.length - 1] !== '\\n') parts.push('\\n');
+                } else if (node.nodeType === 3) {
+                    const t = node.textContent || '';
+                    if (t.trim()) parts.push(t.trim());
+                }
+            };
+            walk(modal);
+            
+            const parentText = parts.join(' ').replace(/\\n\\s*/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim();
+            if (parentText.length > 5) {
+                description = parentText.length > 2000 ? parentText.substring(0, 2000) + '...\\n(truncated)' : parentText;
             }
         }
     }
@@ -124,11 +160,12 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
  * Press the toggle on the right side of Allow Once to expand the Always Allow dropdown.
  */
 const EXPAND_ALWAYS_ALLOW_MENU_SCRIPT = `(() => {
-    const ALLOW_ONCE_PATTERNS = ['allow once', 'allow one time', '今回のみ許可', '1回のみ許可', '一度許可'];
+    const ALLOW_ONCE_PATTERNS = ['allow once', 'allow one time', 'yes, allow this time', '今回のみ許可', '1回のみ許可', '一度許可'];
     const ALWAYS_ALLOW_PATTERNS = [
         'allow this conversation',
         'allow this chat',
         'always allow',
+        'yes, and always allow',
         '常に許可',
         'この会話を許可',
     ];
@@ -204,17 +241,19 @@ export function buildClickScript(buttonText: string): string {
         const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
         const text = ${safeText};
         const wanted = normalize(text);
-        const allButtons = Array.from(document.querySelectorAll('button'));
+        const allButtons = Array.from(document.querySelectorAll('button, [role="button"], a, [class*="btn"], [class*="button"], [class*="action"]')).reverse();
         const target = allButtons.find(btn => {
-            if (!btn.offsetParent) return false;
+            const style = window.getComputedStyle(btn);
+            if (style.display === 'none' || style.visibility === 'hidden' || btn.disabled) return false;
             const buttonText = normalize(btn.textContent || '');
             const ariaLabel = normalize(btn.getAttribute('aria-label') || '');
             return buttonText === wanted ||
                 ariaLabel === wanted ||
-                buttonText.includes(wanted) ||
-                ariaLabel.includes(wanted);
+                (buttonText.includes(wanted) && buttonText.length < wanted.length + 10) ||
+                (ariaLabel.includes(wanted) && ariaLabel.length < wanted.length + 10);
         });
         if (!target) return { ok: false, error: 'Button not found: ' + text };
+        target.scrollIntoView({ block: 'center' });
         const rect = target.getBoundingClientRect();
         const x = rect.left + rect.width / 2;
         const y = rect.top + rect.height / 2;
@@ -222,6 +261,7 @@ export function buildClickScript(buttonText: string): string {
         for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
             target.dispatchEvent(new PointerEvent(type, { ...eventInit, pointerId: 1 }));
         }
+        if (typeof target.click === 'function') target.click();
         return { ok: true };
     })()`;
 }
@@ -244,6 +284,8 @@ export class ApprovalDetector {
     private lastDetectedKey: string | null = null;
     /** Full ApprovalInfo from the last detection (used for clicking) */
     private lastDetectedInfo: ApprovalInfo | null = null;
+    /** Gate for empty polls before reset */
+    private emptyPollGate = new ConsecutiveEmptyPollGate(3);
 
     constructor(options: ApprovalDetectorOptions) {
         this.cdpService = options.cdpService;
@@ -260,6 +302,7 @@ export class ApprovalDetector {
         this.isRunning = true;
         this.lastDetectedKey = null;
         this.lastDetectedInfo = null;
+        this.emptyPollGate.reset();
         this.schedulePoll();
     }
 
@@ -315,6 +358,7 @@ export class ApprovalDetector {
             const info: ApprovalInfo | null = result?.result?.value ?? null;
 
             if (info) {
+                this.emptyPollGate.recordDetection();
                 // Duplicate prevention: use approveText + description combination as key
                 const key = `${info.approveText}::${info.description}`;
                 if (key !== this.lastDetectedKey) {
@@ -323,12 +367,14 @@ export class ApprovalDetector {
                     this.onApprovalRequired(info);
                 }
             } else {
-                // Reset when buttons disappear (prepare for next approval detection)
-                const wasDetected = this.lastDetectedKey !== null;
-                this.lastDetectedKey = null;
-                this.lastDetectedInfo = null;
-                if (wasDetected && this.onResolved) {
-                    this.onResolved();
+                if (this.emptyPollGate.recordEmptyPoll()) {
+                    // Reset when buttons disappear for consecutive polls
+                    const wasDetected = this.lastDetectedKey !== null;
+                    this.lastDetectedKey = null;
+                    this.lastDetectedInfo = null;
+                    if (wasDetected && this.onResolved) {
+                        this.onResolved();
+                    }
                 }
             }
         } catch (error) {

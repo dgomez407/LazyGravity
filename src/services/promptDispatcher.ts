@@ -23,6 +23,7 @@ export interface PromptDispatchOptions {
     artifactService?: ArtifactService;
     onFullCompletion?: () => void;
     responseTimeoutMs?: number;
+    resumeOnly?: boolean;
 }
 
 
@@ -58,6 +59,14 @@ export class PromptDispatcher {
     constructor(private readonly deps: PromptDispatcherDeps) { }
 
     async send(req: PromptDispatchRequest): Promise<void> {
+        await this._dispatch(req, req.options);
+    }
+
+    async resume(req: PromptDispatchRequest): Promise<void> {
+        await this._dispatch(req, { ...req.options, resumeOnly: true } as PromptDispatchOptions);
+    }
+
+    private async _dispatch(req: PromptDispatchRequest, options?: PromptDispatchOptions): Promise<void> {
         await this.deps.sendPromptImpl(
             this.deps.bridge,
             req.message,
@@ -66,7 +75,7 @@ export class PromptDispatcher {
             this.deps.modeService,
             this.deps.modelService,
             req.inboundImages ?? [],
-            req.options,
+            options,
         );
     }
 }

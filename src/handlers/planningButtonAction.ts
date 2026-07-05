@@ -9,10 +9,13 @@ import type { PlatformButtonInteraction } from '../platform/types';
 import type { ButtonAction } from './buttonHandler';
 import type { CdpBridge } from '../services/cdpBridgeManager';
 import { parsePlanningCustomId } from '../services/cdpBridgeManager';
+import { resolveProjectName } from '../utils/projectResolver';
+import type { WorkspaceCommandHandler } from '../commands/workspaceCommandHandler';
 import { logger } from '../utils/logger';
 
 export interface PlanningButtonActionDeps {
     readonly bridge: CdpBridge;
+    readonly wsHandler: WorkspaceCommandHandler;
 }
 
 const MAX_PLAN_CONTENT = 4096;
@@ -47,7 +50,7 @@ export function createPlanningButtonAction(
                 return;
             }
 
-            const projectName = params.projectName || deps.bridge.lastActiveWorkspace;
+            const projectName = resolveProjectName(deps, interaction.channel.id, params.projectName);
             const detector = projectName
                 ? deps.bridge.pool.getPlanningDetector(projectName)
                 : undefined;
@@ -61,16 +64,17 @@ export function createPlanningButtonAction(
 
             if (action === 'open') {
 
-                const clicked = await detector.clickOpenButton();
-                if (!clicked) {
-                    await interaction
-                        .reply({ text: 'Open button not found.' })
-                        .catch(() => {});
-                    return;
+                let clicked = false;
+                if (detector.getLastDetectedInfo()?.hasOpenButton) {
+                    try {
+                        clicked = await detector.clickOpenButton();
+                        if (clicked) {
+                            await new Promise((resolve) => setTimeout(resolve, 500));
+                        }
+                    } catch (e: any) {
+                        logger.error('[PlanningAction] clickOpenButton failed:', e);
+                    }
                 }
-
-                // Wait for DOM to update after Open click
-                await new Promise((resolve) => setTimeout(resolve, 500));
 
                 // Extract plan content with retry
                 let planContent: string | null = null;
@@ -78,6 +82,13 @@ export function createPlanningButtonAction(
                     planContent = await detector.extractPlanContent();
                     if (planContent) break;
                     await new Promise((resolve) => setTimeout(resolve, 500));
+                }
+
+                if (!planContent && !clicked) {
+                    await interaction
+                        .reply({ text: 'Plan content could not be extracted from the IDE.' })
+                        .catch(() => {});
+                    return;
                 }
 
                 await interaction
@@ -103,6 +114,10 @@ export function createPlanningButtonAction(
                         .followUp({ text: 'Could not extract plan content from the editor.' })
                         .catch(() => {});
                 }
+            } else if (action === 'reject') {
+                // Reject action
+                await interaction.reply({ text: 'Rejection of the plan is not allowed.' }).catch(() => {});
+                return;
             } else {
                 // Proceed action
                 await interaction.deferUpdate().catch(() => {});

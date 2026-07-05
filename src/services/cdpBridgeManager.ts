@@ -8,6 +8,7 @@ import {
     buildErrorPopupNotification,
     buildRunCommandNotification,
     buildResolvedOverlay,
+    buildQuestionNotification,
 } from './notificationSender';
 import { ApprovalDetector, ApprovalInfo } from './approvalDetector';
 import { AutoAcceptService } from './autoAcceptService';
@@ -18,6 +19,7 @@ import { PlanningDetector, PlanningInfo } from './planningDetector';
 import { RunCommandDetector, RunCommandInfo } from './runCommandDetector';
 import { QuotaService } from './quotaService';
 import { UserMessageDetector, UserMessageInfo } from './userMessageDetector';
+import { QuestionDetector, QuestionInfo } from './questionDetector';
 
 /** CDP connection state management */
 export interface CdpBridge {
@@ -42,11 +44,15 @@ const ALWAYS_ALLOW_ACTION_PREFIX = 'always_allow_action';
 const DENY_ACTION_PREFIX = 'deny_action';
 const PLANNING_OPEN_ACTION_PREFIX = 'planning_open_action';
 const PLANNING_PROCEED_ACTION_PREFIX = 'planning_proceed_action';
+const PLANNING_REJECT_ACTION_PREFIX = 'planning_reject_action';
 const ERROR_POPUP_DISMISS_ACTION_PREFIX = 'error_popup_dismiss_action';
 const ERROR_POPUP_COPY_DEBUG_ACTION_PREFIX = 'error_popup_copy_debug_action';
 const ERROR_POPUP_RETRY_ACTION_PREFIX = 'error_popup_retry_action';
 const RUN_COMMAND_RUN_ACTION_PREFIX = 'run_command_run_action';
 const RUN_COMMAND_REJECT_ACTION_PREFIX = 'run_command_reject_action';
+export const QUESTION_SELECT_ACTION_PREFIX = 'question_select_action';
+export const FILE_CHANGE_ACCEPT_ACTION_PREFIX = 'ide_file_accept_all';
+export const FILE_CHANGE_REJECT_ACTION_PREFIX = 'ide_file_reject_all';
 
 function normalizeSessionTitle(title: string): string {
     return title.trim().toLowerCase();
@@ -166,25 +172,30 @@ export function parseApprovalCustomId(customId: string): { action: 'approve' | '
 }
 
 export function buildPlanningCustomId(
-    action: 'open' | 'proceed',
+    action: 'open' | 'proceed' | 'reject',
     projectName: string,
     channelId?: string,
 ): string {
     const prefix = action === 'open'
         ? PLANNING_OPEN_ACTION_PREFIX
-        : PLANNING_PROCEED_ACTION_PREFIX;
+        : action === 'proceed'
+            ? PLANNING_PROCEED_ACTION_PREFIX
+            : PLANNING_REJECT_ACTION_PREFIX;
     if (channelId && channelId.trim().length > 0) {
         return `${prefix}:${projectName}:${channelId}`;
     }
     return `${prefix}:${projectName}`;
 }
 
-export function parsePlanningCustomId(customId: string): { action: 'open' | 'proceed'; projectName: string | null; channelId: string | null } | null {
+export function parsePlanningCustomId(customId: string): { action: 'open' | 'proceed' | 'reject'; projectName: string | null; channelId: string | null } | null {
     if (customId === PLANNING_OPEN_ACTION_PREFIX) {
         return { action: 'open', projectName: null, channelId: null };
     }
     if (customId === PLANNING_PROCEED_ACTION_PREFIX) {
         return { action: 'proceed', projectName: null, channelId: null };
+    }
+    if (customId === PLANNING_REJECT_ACTION_PREFIX) {
+        return { action: 'reject', projectName: null, channelId: null };
     }
     if (customId.startsWith(`${PLANNING_OPEN_ACTION_PREFIX}:`)) {
         const rest = customId.substring(`${PLANNING_OPEN_ACTION_PREFIX}:`.length);
@@ -195,6 +206,11 @@ export function parsePlanningCustomId(customId: string): { action: 'open' | 'pro
         const rest = customId.substring(`${PLANNING_PROCEED_ACTION_PREFIX}:`.length);
         const [projectName, channelId] = rest.split(':');
         return { action: 'proceed', projectName: projectName || null, channelId: channelId || null };
+    }
+    if (customId.startsWith(`${PLANNING_REJECT_ACTION_PREFIX}:`)) {
+        const rest = customId.substring(`${PLANNING_REJECT_ACTION_PREFIX}:`.length);
+        const [projectName, channelId] = rest.split(':');
+        return { action: 'reject', projectName: projectName || null, channelId: channelId || null };
     }
     return null;
 }
@@ -271,6 +287,40 @@ export function parseRunCommandCustomId(customId: string): { action: 'run' | 're
     }
     if (customId.startsWith(`${RUN_COMMAND_REJECT_ACTION_PREFIX}:`)) {
         const rest = customId.substring(`${RUN_COMMAND_REJECT_ACTION_PREFIX}:`.length);
+        const [projectName, channelId] = rest.split(':');
+        return { action: 'reject', projectName: projectName || null, channelId: channelId || null };
+    }
+    return null;
+}
+
+export function buildFileChangeCustomId(
+    action: 'accept' | 'reject',
+    projectName: string,
+    channelId?: string,
+): string {
+    const prefix = action === 'accept'
+        ? FILE_CHANGE_ACCEPT_ACTION_PREFIX
+        : FILE_CHANGE_REJECT_ACTION_PREFIX;
+    if (channelId && channelId.trim().length > 0) {
+        return `${prefix}:${projectName}:${channelId}`;
+    }
+    return `${prefix}:${projectName}`;
+}
+
+export function parseFileChangeCustomId(customId: string): { action: 'accept' | 'reject'; projectName: string | null; channelId: string | null } | null {
+    if (customId === FILE_CHANGE_ACCEPT_ACTION_PREFIX) {
+        return { action: 'accept', projectName: null, channelId: null };
+    }
+    if (customId === FILE_CHANGE_REJECT_ACTION_PREFIX) {
+        return { action: 'reject', projectName: null, channelId: null };
+    }
+    if (customId.startsWith(`${FILE_CHANGE_ACCEPT_ACTION_PREFIX}:`)) {
+        const rest = customId.substring(`${FILE_CHANGE_ACCEPT_ACTION_PREFIX}:`.length);
+        const [projectName, channelId] = rest.split(':');
+        return { action: 'accept', projectName: projectName || null, channelId: channelId || null };
+    }
+    if (customId.startsWith(`${FILE_CHANGE_REJECT_ACTION_PREFIX}:`)) {
+        const rest = customId.substring(`${FILE_CHANGE_REJECT_ACTION_PREFIX}:`.length);
         const [projectName, channelId] = rest.split(':');
         return { action: 'reject', projectName: projectName || null, channelId: channelId || null };
     }
@@ -381,17 +431,31 @@ export function ensureApprovalDetector(
                 }
             }
 
+            const extraFields = [
+                { name: t('Allow button'), value: info.approveText || t('(None)'), inline: true },
+            ];
+            
+            if (info.alwaysAllowText) {
+                extraFields.push({ name: t('Allow Chat button'), value: info.alwaysAllowText, inline: true });
+            }
+            
+            extraFields.push({ name: t('Deny button'), value: info.denyText || t('(None)'), inline: true });
+
             const payload = buildApprovalNotification({
                 title: t('Approval Required'),
                 description: info.description || t('Antigravity is requesting approval for an action'),
                 projectName,
                 channelId: targetChannelId,
-                extraFields: [
-                    { name: t('Allow button'), value: info.approveText, inline: true },
-                    { name: t('Allow Chat button'), value: info.alwaysAllowText || t('In Dropdown'), inline: true },
-                    { name: t('Deny button'), value: info.denyText || t('(None)'), inline: true },
-                ],
+                extraFields,
+                hasAlwaysAllow: !!info.alwaysAllowText,
+                alwaysAllowText: info.alwaysAllowText,
             });
+
+            if (lastNotification) {
+                lastNotification.payload = payload;
+                lastNotification.sent.edit(payload).catch(logger.error);
+                return;
+            }
 
             const sent = await targetChannel.send(payload).catch((err: any) => {
                 logger.error(err);
@@ -466,7 +530,16 @@ export function ensurePlanningDetector(
                 projectName,
                 channelId: targetChannelId,
                 extraFields,
+                hasOpenButton: info.hasOpenButton,
+                openText: info.openText,
+                proceedText: info.proceedText,
             });
+
+            if (lastNotification) {
+                lastNotification.payload = payload;
+                lastNotification.sent.edit(payload).catch(logger.error);
+                return;
+            }
 
             const sent = await targetChannel.send(payload).catch((err: any) => {
                 logger.error(err);
@@ -671,7 +744,60 @@ export function ensureUserMessageDetector(
     
     (detector as any).__userMsgHandler = onUserMessage;
     detector.on('message', onUserMessage);
+
     detector.start();
     bridge.pool.registerUserMessageDetector(projectName, detector, accountName);
     logger.debug(`[UserMessageDetector:${projectName}] Started user message detection`);
+}
+
+export function ensureQuestionDetector(
+    bridge: CdpBridge,
+    cdp: CdpService,
+    projectName: string,
+    accountName: string = 'default',
+): void {
+    const existing = bridge.pool.getQuestionDetector(projectName, accountName);
+    if (existing && existing.isActive) return;
+
+    let lastNotification: { sent: PlatformSentMessage; payload: MessagePayload } | null = null;
+
+    const detector = new QuestionDetector({
+        cdpService: cdp,
+        pollIntervalMs: 2000,
+        onResolved: () => {
+            if (!lastNotification) return;
+            const { sent, payload } = lastNotification;
+            lastNotification = null;
+            const resolved = buildResolvedOverlay(payload, t('Question answered'));
+            sent.edit(resolved).catch(logger.error);
+        },
+        onQuestionRequired: async (info: QuestionInfo) => {
+            const currentChatTitle = await getCurrentChatTitle(cdp);
+            const targetChannel = resolveApprovalChannelForCurrentChat(bridge, projectName, currentChatTitle);
+            const targetChannelId = targetChannel ? targetChannel.id : '';
+
+            if (!targetChannel || !targetChannelId) return;
+
+            const payload = buildQuestionNotification({
+                title: info.title,
+                description: info.description,
+                projectName,
+                channelId: targetChannelId,
+                options: info.options,
+            });
+
+            const sent = await targetChannel.send(payload).catch((err: any) => {
+                logger.error(err);
+                return null;
+            });
+            if (sent) {
+                lastNotification = { sent, payload };
+            }
+        },
+    });
+
+    detector.setProjectName(projectName);
+    detector.start();
+    bridge.pool.registerQuestionDetector(projectName, detector, accountName);
+    logger.debug(`[QuestionDetector:${projectName}] Started question detection`);
 }

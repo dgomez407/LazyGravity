@@ -167,11 +167,12 @@ export class ArtifactService {
     }
 
     /**
-     * Try to find a conversation UUID whose overview.txt contains the given session title.
+     * Try to find a conversation UUID whose transcript or overview contains the given session title.
      * Uses an exact match first, falling back to keyword overlap scoring.
+     * If workspaceFilter is provided, restricts matching exclusively to conversations belonging to that workspace.
      * Returns the UUID or null if not found.
      */
-    findConversationByTitle(title: string): string | null {
+    findConversationByTitle(title: string, workspaceFilter?: string): string | null {
         if (!title || !title.trim()) return null;
         const needle = title.trim().toLowerCase();
         const ids = this.listConversationIds();
@@ -207,45 +208,58 @@ export class ArtifactService {
         
         // Require a stronger minimum score of 2 to prevent weak one-word matches.
         const minScore = 2;
+        const filterStr = workspaceFilter ? workspaceFilter.toLowerCase() : null;
 
         for (const id of sortedIds) {
-            const overviewPath = path.join(
-                this.brainBasePath,
-                id,
-                '.system_generated',
-                'logs',
-                'overview.txt',
-            );
-            try {
-                if (!fs.existsSync(overviewPath)) continue;
-                // Only read the first 4KB to avoid huge files
-                let fd: number | null = null;
-                try {
-                    fd = fs.openSync(overviewPath, 'r');
-                    const buf = Buffer.alloc(4096);
-                    const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
-                    const header = buf.slice(0, bytesRead).toString('utf-8').toLowerCase();
-                    
-                    if (header.includes(needle)) {
-                        return id; // Exact match takes precedence
-                    }
+            let score = 0;
+            let exactMatch = false;
+            let belongsToWorkspace = !filterStr; // True if no filter, or if we prove it belongs
 
-                    // Use same Unicode-aware split for header tokens
-                    const headerTokens = new Set(header.replace(/[^\p{L}\p{N}]+/gu, ' ').split(/\s+/));
-                    
-                    let score = 0;
-                    for (const word of uniqueNeedleWords) {
-                        if (headerTokens.has(word)) score++;
+            const scanFile = (filePath: string, readSize: number) => {
+                try {
+                    if (!fs.existsSync(filePath)) return;
+                    let fd = null;
+                    try {
+                        fd = fs.openSync(filePath, 'r');
+                        const buf = Buffer.alloc(readSize);
+                        const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
+                        const content = buf.slice(0, bytesRead).toString('utf-8').toLowerCase();
+                        
+                        if (filterStr && content.includes(filterStr)) {
+                            belongsToWorkspace = true;
+                        }
+                        
+                        if (belongsToWorkspace) {
+                            if (content.includes(needle)) {
+                                exactMatch = true;
+                            } else {
+                                const contentTokens = new Set(content.replace(/[^\p{L}\p{N}]+/gu, ' ').split(/\s+/));
+                                let currentScore = 0;
+                                for (const word of uniqueNeedleWords) {
+                                    if (contentTokens.has(word)) currentScore++;
+                                }
+                                if (currentScore > score) score = currentScore;
+                            }
+                        }
+                    } finally {
+                        if (fd !== null) fs.closeSync(fd);
                     }
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestId = id;
-                    }
-                } finally {
-                    if (fd !== null) fs.closeSync(fd);
-                }
-            } catch {
-                // Skip unreadable files
+                } catch { /* ignore */ }
+            };
+
+            // 1. Check transcript.jsonl (modern)
+            scanFile(path.join(this.brainBasePath, id, '.system_generated', 'logs', 'transcript.jsonl'), 16384);
+
+            // 2. Check overview.txt (legacy)
+            scanFile(path.join(this.brainBasePath, id, '.system_generated', 'logs', 'overview.txt'), 4096);
+
+            if (!belongsToWorkspace) continue;
+            
+            if (exactMatch) return id; // Exact match in the right workspace takes precedence immediately
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestId = id;
             }
         }
 
@@ -284,6 +298,14 @@ export class ArtifactService {
 
         // Nothing has artifacts — return most recent anyway (caller handles empty list)
         return sorted[0]?.id ?? null;
+    }
+
+    /**
+     * Build the filesystem path for a specific artifact file.
+     */
+    getArtifactPath(conversationId: string, filename: string): string {
+        const safe = path.basename(filename);
+        return path.join(this.brainBasePath, conversationId, safe);
     }
 
     /**

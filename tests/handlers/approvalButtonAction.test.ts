@@ -72,7 +72,7 @@ describe('createApprovalButtonAction', () => {
     describe('match', () => {
         it('matches approve_action customId', () => {
             const bridge = makeBridge();
-            const action = createApprovalButtonAction({ bridge });
+            const action = createApprovalButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const result = action.match('approve_action:myProject:ch-1');
             expect(result).toEqual({
                 action: 'approve',
@@ -83,7 +83,7 @@ describe('createApprovalButtonAction', () => {
 
         it('matches always_allow_action customId', () => {
             const bridge = makeBridge();
-            const action = createApprovalButtonAction({ bridge });
+            const action = createApprovalButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const result = action.match('always_allow_action:proj');
             expect(result).toEqual({
                 action: 'always_allow',
@@ -94,7 +94,7 @@ describe('createApprovalButtonAction', () => {
 
         it('matches deny_action customId', () => {
             const bridge = makeBridge();
-            const action = createApprovalButtonAction({ bridge });
+            const action = createApprovalButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const result = action.match('deny_action:proj:ch-2');
             expect(result).toEqual({
                 action: 'deny',
@@ -105,7 +105,7 @@ describe('createApprovalButtonAction', () => {
 
         it('returns null for unrelated customId', () => {
             const bridge = makeBridge();
-            const action = createApprovalButtonAction({ bridge });
+            const action = createApprovalButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             expect(action.match('planning_open_action:proj')).toBeNull();
             expect(action.match('random_button')).toBeNull();
         });
@@ -117,7 +117,7 @@ describe('createApprovalButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getApprovalDetector as jest.Mock).mockReturnValue(mockDetector);
 
-            const action = createApprovalButtonAction({ bridge });
+            const action = createApprovalButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction({ customId: 'approve_action:myProject:ch-1' });
 
             await action.execute(interaction, {
@@ -138,7 +138,7 @@ describe('createApprovalButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getApprovalDetector as jest.Mock).mockReturnValue(mockDetector);
 
-            const action = createApprovalButtonAction({ bridge });
+            const action = createApprovalButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {
@@ -159,7 +159,7 @@ describe('createApprovalButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getApprovalDetector as jest.Mock).mockReturnValue(mockDetector);
 
-            const action = createApprovalButtonAction({ bridge });
+            const action = createApprovalButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {
@@ -179,7 +179,7 @@ describe('createApprovalButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getApprovalDetector as jest.Mock).mockReturnValue(undefined);
 
-            const action = createApprovalButtonAction({ bridge });
+            const action = createApprovalButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {
@@ -198,7 +198,7 @@ describe('createApprovalButtonAction', () => {
             const bridge = makeBridge();
             (bridge.pool.getApprovalDetector as jest.Mock).mockReturnValue(mockDetector);
 
-            const action = createApprovalButtonAction({ bridge });
+            const action = createApprovalButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {
@@ -214,7 +214,7 @@ describe('createApprovalButtonAction', () => {
 
         it('rejects interaction from wrong channel', async () => {
             const bridge = makeBridge();
-            const action = createApprovalButtonAction({ bridge });
+            const action = createApprovalButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn() } as any });
             const interaction = makeInteraction({
                 channel: makeChannel({ id: 'ch-other' }),
             });
@@ -230,12 +230,13 @@ describe('createApprovalButtonAction', () => {
             });
         });
 
-        it('falls back to lastActiveWorkspace when projectName is empty', async () => {
+        it('falls back to wsHandler when projectName is empty', async () => {
             const mockDetector = { approveButton: jest.fn().mockResolvedValue(true), getLastDetectedInfo: jest.fn().mockReturnValue(null) };
-            const bridge = makeBridge({ lastActiveWorkspace: 'fallbackProject' });
+            const bridge = makeBridge();
             (bridge.pool.getApprovalDetector as jest.Mock).mockReturnValue(mockDetector);
+            bridge.pool.extractProjectName = jest.fn().mockReturnValue('fallbackProject');
 
-            const action = createApprovalButtonAction({ bridge });
+            const action = createApprovalButtonAction({ bridge, wsHandler: { getWorkspaceForChannel: jest.fn().mockReturnValue('/path/to/ws') } as any });
             const interaction = makeInteraction();
 
             await action.execute(interaction, {

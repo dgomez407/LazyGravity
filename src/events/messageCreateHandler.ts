@@ -16,6 +16,7 @@ import {
     ensureErrorPopupDetector as ensureErrorPopupDetectorFn,
     ensurePlanningDetector as ensurePlanningDetectorFn,
     ensureRunCommandDetector as ensureRunCommandDetectorFn,
+    ensureQuestionDetector as ensureQuestionDetectorFn,
     getCurrentCdp as getCurrentCdpFn,
     registerApprovalSessionChannel as registerApprovalSessionChannelFn,
     registerApprovalWorkspaceChannel as registerApprovalWorkspaceChannelFn,
@@ -72,6 +73,7 @@ export interface MessageCreateHandlerDeps {
     ensureErrorPopupDetector?: (bridge: CdpBridge, cdp: CdpService, projectName: string) => void;
     ensurePlanningDetector?: (bridge: CdpBridge, cdp: CdpService, projectName: string) => void;
     ensureRunCommandDetector?: (bridge: CdpBridge, cdp: CdpService, projectName: string) => void;
+    ensureQuestionDetector?: (bridge: CdpBridge, cdp: CdpService, projectName: string) => void;
     registerApprovalWorkspaceChannel?: (bridge: CdpBridge, projectName: string, channel: PlatformChannel) => void;
     registerApprovalSessionChannel?: (bridge: CdpBridge, projectName: string, sessionTitle: string, channel: PlatformChannel) => void;
     downloadInboundImageAttachments?: (message: Message) => Promise<InboundImageAttachment[]>;
@@ -89,6 +91,7 @@ export function createMessageCreateHandler(deps: MessageCreateHandlerDeps) {
     const ensureErrorPopupDetector = deps.ensureErrorPopupDetector ?? ensureErrorPopupDetectorFn;
     const ensurePlanningDetector = deps.ensurePlanningDetector ?? ensurePlanningDetectorFn;
     const ensureRunCommandDetector = deps.ensureRunCommandDetector ?? ensureRunCommandDetectorFn;
+    const ensureQuestionDetector = deps.ensureQuestionDetector ?? ensureQuestionDetectorFn;
     const registerApprovalWorkspaceChannel = deps.registerApprovalWorkspaceChannel ?? registerApprovalWorkspaceChannelFn;
     const registerApprovalSessionChannel = deps.registerApprovalSessionChannel ?? registerApprovalSessionChannelFn;
     const downloadInboundImageAttachments = deps.downloadInboundImageAttachments ?? downloadInboundImageAttachmentsFn;
@@ -290,10 +293,57 @@ export function createMessageCreateHandler(deps: MessageCreateHandlerDeps) {
             return;
         }
 
-        const hasImageAttachments = Array.from(message.attachments.values())
-            .some((attachment) => isImageAttachment(attachment.contentType, attachment.name));
-        if (message.content.trim() || hasImageAttachments) {
-            const promptText = message.content.trim() || 'Please review the attached images and respond accordingly.';
+        const allAttachments = Array.from(message.attachments.values());
+        const hasImageAttachments = allAttachments.some((attachment) => isImageAttachment(attachment.contentType, attachment.name));
+        
+        const MAX_TEXT_ATTACHMENT_SIZE = 50 * 1024; // 50KB
+        const textAttachments = allAttachments.filter((a) => {
+            if (isImageAttachment(a.contentType, a.name)) return false;
+            if (a.size > MAX_TEXT_ATTACHMENT_SIZE) return false;
+            const isTextType = a.contentType?.startsWith('text/') || a.contentType?.startsWith('application/json') || a.contentType?.startsWith('application/javascript');
+            const hasTextExt = a.name?.match(/\.(txt|md|js|ts|py|json|html|css|csv|log|sh|yml|yaml|xml)$/i);
+            return isTextType || hasTextExt;
+        });
+
+        if (message.content.trim() || hasImageAttachments || textAttachments.length > 0) {
+            let promptText = message.content.trim() || 'Please review the attached content and respond accordingly.';
+
+            // Prepend reply context if replying to a message
+            if (message.reference && message.reference.messageId) {
+                try {
+                    const repliedTo = await message.channel.messages.fetch(message.reference.messageId);
+                    if (repliedTo) {
+                        const cleanContent = (repliedTo.content || '(Attachment/Embed)').trim();
+                        const truncated = cleanContent.length > 500 ? cleanContent.substring(0, 500) + '...' : cleanContent;
+                        promptText = `[Replying to context: "${truncated}"]\n\n${promptText}`;
+                    }
+                } catch (e) {
+                    logger.warn('[MessageCreate] Failed to fetch replied-to message context:', e);
+                }
+            }
+
+            // Fetch and append text attachments in parallel with a small concurrency cap
+            const CONCURRENCY_LIMIT = 3;
+            for (let i = 0; i < textAttachments.length; i += CONCURRENCY_LIMIT) {
+                const chunk = textAttachments.slice(i, i + CONCURRENCY_LIMIT);
+                const results = await Promise.all(chunk.map(async (textAtt) => {
+                    try {
+                        const res = await fetch(textAtt.url);
+                        if (res.ok) {
+                            const content = await res.text();
+                            return `\n\n[Attached File: ${textAtt.name}]\n\`\`\`\n${content}\n\`\`\``;
+                        } else {
+                            logger.warn(`[MessageCreate] Non-ok status fetching text attachment ${textAtt.name}: ${res.status}`);
+                            return '';
+                        }
+                    } catch (e) {
+                        logger.warn(`[MessageCreate] Failed to fetch text attachment ${textAtt.name}:`, e);
+                        return '';
+                    }
+                }));
+                promptText += results.join('');
+            }
+
             const inboundImages = await downloadInboundImageAttachments(message);
 
             if (hasImageAttachments && inboundImages.length === 0) {
@@ -372,6 +422,7 @@ export function createMessageCreateHandler(deps: MessageCreateHandlerDeps) {
                             ensureErrorPopupDetector(deps.bridge, cdp, projectName, selectedAccount);
                             ensurePlanningDetector(deps.bridge, cdp, projectName, selectedAccount);
                             ensureRunCommandDetector(deps.bridge, cdp, projectName, selectedAccount);
+                            ensureQuestionDetector(deps.bridge, cdp, projectName, selectedAccount);
 
                             let session = deps.chatSessionRepo.findByChannelId(message.channelId);
                             const staleSessionAccount = session?.isRenamed

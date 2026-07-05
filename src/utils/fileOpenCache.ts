@@ -1,6 +1,6 @@
 /** 
  * In-memory cache to map button customIds to file URLs.
- * Bounded to a maximum size to prevent memory leaks, and entries are removed once consumed.
+ * Bounded to a maximum size to prevent memory leaks, using a FIFO eviction policy when the cache size limit is reached.
  */
 class BoundedCache<K, V> {
     private max_size: number;
@@ -23,11 +23,7 @@ class BoundedCache<K, V> {
     }
 
     get(key: K): V | undefined {
-        const value = this.map.get(key);
-        if (value !== undefined) {
-            this.map.delete(key); // Remove upon consumption
-        }
-        return value;
+        return this.map.get(key);
     }
 }
 

@@ -85,24 +85,37 @@ export class QuestionDetector extends EventEmitter {
             const callParams: any = {
                 expression: `
                 (() => {
+                    const getInteractiveItems = (elContainer) => {
+                        return Array.from(elContainer.querySelectorAll('li, label, a, [role="radio"], [role="option"], [class*="cursor-pointer"]'))
+                            .filter(el => {
+                                if (el.tagName === 'BUTTON' || el.closest('button')) return false;
+                                const role = el.getAttribute('role');
+                                if (['radio', 'option', 'checkbox', 'button', 'menuitem'].includes(role)) return true;
+                                if (el.tagName === 'A' || el.tagName === 'LABEL') return true;
+                                const style = window.getComputedStyle(el);
+                                return style.cursor === 'pointer';
+                            });
+                    };
                     const containers = Array.from(document.querySelectorAll('div, form, dialog')).reverse();
                     let targetList = null;
                     let submitBtn = null;
                     
                     for (const container of containers) {
+                        const hasTextInput = container.querySelector('textarea, input:not([type="hidden"]):not([type="radio"]):not([type="checkbox"]), [contenteditable], [role="textbox"], .monaco-editor, .editor-container, .inputarea, vscode-text-field, vscode-text-area');
+                        const hasExplicitQuestionItems = container.querySelector('[role="radio"], input[type="radio"], input[type="checkbox"], [role="option"], [role="checkbox"]');
+                        if (hasTextInput && !hasExplicitQuestionItems) continue;
                         const buttons = Array.from(container.querySelectorAll('button'));
                         let possibleSubmitBtn = null;
                         for (const btn of buttons) {
                             const text = btn.textContent?.toLowerCase() || '';
-                            if (text.includes('submit')) {
+                            if (text.includes('submit') || text.includes('continue')) {
                                 possibleSubmitBtn = btn;
                                 break;
                             }
                         }
                         
                         if (possibleSubmitBtn) {
-                            const items = Array.from(container.querySelectorAll('li, label, a, [role="radio"], [role="option"], [class*="cursor-pointer"]'))
-                                .filter(el => el.tagName !== 'BUTTON' && !el.closest('button'));
+                            const items = getInteractiveItems(container);
                             
                             if (items.length > 1) {
                                 targetList = container;
@@ -114,30 +127,38 @@ export class QuestionDetector extends EventEmitter {
 
                     if (!targetList || !submitBtn) return { found: false };
 
-                    const items = Array.from(targetList.querySelectorAll('li, label, a, [role="radio"], [role="option"], [class*="cursor-pointer"]'))
-                        .filter(el => el.tagName !== 'BUTTON' && !el.closest('button'));
+                    const items = getInteractiveItems(targetList);
                     if (items.length <= ${index}) return { found: false };
                     
                     const targetOption = items[${index}];
                     
-                    const optionRect = targetOption.getBoundingClientRect();
-                    const btnRect = submitBtn.getBoundingClientRect();
-                    
-                    return {
-                        found: true,
-                        option: {
-                            x: Math.round(optionRect.left + optionRect.width / 2),
-                            y: Math.round(optionRect.top + optionRect.height / 2)
-                        },
-                        button: {
-                            x: Math.round(btnRect.left + btnRect.width / 2),
-                            y: Math.round(btnRect.top + btnRect.height / 2)
+                    const clickElement = (el) => {
+                        const rect = el.getBoundingClientRect();
+                        const clickX = rect.left + rect.width / 2;
+                        const clickY = rect.top + rect.height / 2;
+                        const events = ['pointerdown', 'mousedown', 'mouseup', 'click'];
+                        for (const type of events) {
+                            el.dispatchEvent(new MouseEvent(type, {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: clickX,
+                                clientY: clickY,
+                            }));
                         }
                     };
+                    
+                    return new Promise(resolve => {
+                        clickElement(targetOption);
+                        setTimeout(() => {
+                            clickElement(submitBtn);
+                            resolve({ found: true });
+                        }, 50);
+                    });
                 })()
                 `,
                 returnByValue: true,
-                awaitPromise: false,
+                awaitPromise: true,
             };
             if (contextId !== null) {
                 callParams.contextId = contextId;
@@ -150,40 +171,6 @@ export class QuestionDetector extends EventEmitter {
                 this.logger.warn(`[QuestionDetector:${this.projectName}] Could not find question modal elements during submission.`);
                 return false;
             }
-
-            // Click the option
-            await this.cdp.call('Input.dispatchMouseEvent', {
-                type: 'mousePressed',
-                x: result.option.x,
-                y: result.option.y,
-                button: 'left',
-                clickCount: 1,
-            });
-            await this.cdp.call('Input.dispatchMouseEvent', {
-                type: 'mouseReleased',
-                x: result.option.x,
-                y: result.option.y,
-                button: 'left',
-                clickCount: 1,
-            });
-            
-            await new Promise(resolve => setTimeout(resolve, 50));
-
-            // Click the submit button
-            await this.cdp.call('Input.dispatchMouseEvent', {
-                type: 'mousePressed',
-                x: result.button.x,
-                y: result.button.y,
-                button: 'left',
-                clickCount: 1,
-            });
-            await this.cdp.call('Input.dispatchMouseEvent', {
-                type: 'mouseReleased',
-                x: result.button.x,
-                y: result.button.y,
-                button: 'left',
-                clickCount: 1,
-            });
 
             this.lastQuestionDetected = false;
             return true;
@@ -201,12 +188,26 @@ export class QuestionDetector extends EventEmitter {
             const callParams: any = {
                 expression: `
                 (() => {
+                    const getInteractiveItems = (elContainer) => {
+                        return Array.from(elContainer.querySelectorAll('li, label, a, [role="radio"], [role="option"], [class*="cursor-pointer"]'))
+                            .filter(el => {
+                                if (el.tagName === 'BUTTON' || el.closest('button')) return false;
+                                const role = el.getAttribute('role');
+                                if (['radio', 'option', 'checkbox', 'button', 'menuitem'].includes(role)) return true;
+                                if (el.tagName === 'A' || el.tagName === 'LABEL') return true;
+                                const style = window.getComputedStyle(el);
+                                return style.cursor === 'pointer';
+                            });
+                    };
+
                     const containers = Array.from(document.querySelectorAll('div, form, dialog')).reverse();
                     let skipBtn = null;
                     
                     for (const container of containers) {
-                        const items = Array.from(container.querySelectorAll('li, [role="radio"], [role="option"], .cursor-pointer'))
-                            .filter(el => el.tagName !== 'BUTTON' && !el.closest('button'));
+                        const hasTextInput = container.querySelector('textarea, input:not([type="hidden"]):not([type="radio"]):not([type="checkbox"]), [contenteditable="true"], [contenteditable=""], [role="textbox"]');
+                        const hasExplicitQuestionItems = container.querySelector('[role="radio"], input[type="radio"], input[type="checkbox"], [role="option"], [role="checkbox"]');
+                        if (hasTextInput && !hasExplicitQuestionItems) continue;
+                        const items = getInteractiveItems(container);
                         const hasList = items.length > 1;
                         
                         const buttons = Array.from(container.querySelectorAll('button'));
@@ -222,14 +223,24 @@ export class QuestionDetector extends EventEmitter {
 
                     if (!skipBtn) return { found: false };
                     
-                    const btnRect = skipBtn.getBoundingClientRect();
-                    return {
-                        found: true,
-                        button: {
-                            x: Math.round(btnRect.left + btnRect.width / 2),
-                            y: Math.round(btnRect.top + btnRect.height / 2)
+                    const clickElement = (el) => {
+                        const rect = el.getBoundingClientRect();
+                        const clickX = rect.left + rect.width / 2;
+                        const clickY = rect.top + rect.height / 2;
+                        const events = ['pointerdown', 'mousedown', 'mouseup', 'click'];
+                        for (const type of events) {
+                            el.dispatchEvent(new MouseEvent(type, {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: clickX,
+                                clientY: clickY,
+                            }));
                         }
                     };
+                    
+                    clickElement(skipBtn);
+                    return { found: true };
                 })()
                 `,
                 returnByValue: true,
@@ -244,21 +255,6 @@ export class QuestionDetector extends EventEmitter {
                 this.logger.warn(`[QuestionDetector:${this.projectName}] Could not find skip button.`);
                 return false;
             }
-
-            await this.cdp.call('Input.dispatchMouseEvent', {
-                type: 'mousePressed',
-                x: result.button.x,
-                y: result.button.y,
-                button: 'left',
-                clickCount: 1,
-            });
-            await this.cdp.call('Input.dispatchMouseEvent', {
-                type: 'mouseReleased',
-                x: result.button.x,
-                y: result.button.y,
-                button: 'left',
-                clickCount: 1,
-            });
 
             this.lastQuestionDetected = false;
             return true;
@@ -275,24 +271,73 @@ export class QuestionDetector extends EventEmitter {
             const callParams: any = {
                 expression: `
                 (() => {
+                    const STOP_PATTERNS = [
+                        /^stop$/,
+                        /^stop generating$/,
+                        /^stop response$/,
+                        /^停止$/,
+                        /^生成を停止$/,
+                        /^応答を停止$/,
+                    ];
+                    const normalize = (value) => (value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+                    const isStopLabel = (value) => {
+                        const normalized = normalize(value);
+                        if (!normalized) return false;
+                        return STOP_PATTERNS.some((re) => re.test(normalized));
+                    };
+                    const isGenerating = Array.from(document.querySelectorAll('button, [role="button"]')).some(btn => {
+                        const labels = [
+                            btn.textContent || '',
+                            btn.getAttribute('aria-label') || '',
+                            btn.getAttribute('title') || '',
+                        ];
+                        return labels.some(isStopLabel);
+                    }) || (() => {
+                        const panel = document.querySelector('.antigravity-agent-side-panel');
+                        if (panel) {
+                            const panelText = (panel.textContent || '').trim();
+                            return /Working\.\s*$/i.test(panelText);
+                        }
+                        return false;
+                    })();
+                    if (isGenerating) {
+                        return { detected: false, reason: "IDE is generating" };
+                    }
+
+                    const getInteractiveItems = (elContainer) => {
+                        return Array.from(elContainer.querySelectorAll('li, label, a, [role="radio"], [role="option"], [class*="cursor-pointer"]'))
+                            .filter(el => {
+                                if (el.tagName === 'BUTTON' || el.closest('button')) return false;
+                                const text = (el.innerText || el.textContent || '').trim();
+                                if (!text) return false;
+                                const role = el.getAttribute('role');
+                                if (['radio', 'option', 'checkbox', 'button', 'menuitem'].includes(role)) return true;
+                                if (el.tagName === 'A' || el.tagName === 'LABEL') return true;
+                                const style = window.getComputedStyle(el);
+                                return style.cursor === 'pointer';
+                            });
+                    };
+
                     const containers = Array.from(document.querySelectorAll('div, form, dialog')).reverse();
                     let targetList = null;
                     let submitBtn = null;
                     
                     for (const container of containers) {
+                        const hasTextInput = container.querySelector('textarea, input:not([type="hidden"]):not([type="radio"]):not([type="checkbox"]), [contenteditable], [role="textbox"], .monaco-editor, .editor-container, .inputarea, vscode-text-field, vscode-text-area');
+                        const hasExplicitQuestionItems = container.querySelector('[role="radio"], input[type="radio"], input[type="checkbox"], [role="option"], [role="checkbox"]');
+                        if (hasTextInput && !hasExplicitQuestionItems) continue;
                         const buttons = Array.from(container.querySelectorAll('button'));
                         let possibleSubmitBtn = null;
                         for (const btn of buttons) {
                             const text = btn.textContent?.toLowerCase() || '';
-                            if (text.includes('submit')) {
+                            if (text.includes('submit') || text.includes('continue')) {
                                 possibleSubmitBtn = btn;
                                 break;
                             }
                         }
                         
                         if (possibleSubmitBtn) {
-                            const items = Array.from(container.querySelectorAll('li, label, a, [role="radio"], [role="option"], [class*="cursor-pointer"]'))
-                                .filter(el => el.tagName !== 'BUTTON' && !el.closest('button'));
+                            const items = getInteractiveItems(container);
                             
                             if (items.length > 1) {
                                 targetList = container;
@@ -314,8 +359,7 @@ export class QuestionDetector extends EventEmitter {
                     }
                     const title = titleEl ? (titleEl.innerText || titleEl.textContent || '').trim() : 'Question';
                     
-                    const items = Array.from(targetList.querySelectorAll('li, label, a, [role="radio"], [role="option"], [class*="cursor-pointer"]'))
-                        .filter(el => el.tagName !== 'BUTTON' && !el.closest('button'));
+                    const items = getInteractiveItems(targetList);
                     const options = items.map(n => {
                         const rect = n.getBoundingClientRect();
                         const finalLabel = n.innerText || n.textContent || 'Option';
@@ -359,6 +403,8 @@ export class QuestionDetector extends EventEmitter {
                     return null;
                 });
                 
+                if (!this._isStarted) return;
+                
                 if (response?.exceptionDetails) {
                     this.logger.debug(`[QuestionDetector] Exception on ctx ${contextId}: ${response.exceptionDetails.exception?.description || response.exceptionDetails.text}`);
                 }
@@ -375,6 +421,8 @@ export class QuestionDetector extends EventEmitter {
                     lastReason = result.reason;
                 }
             }
+
+            if (!this._isStarted) return;
 
             const result = detectedResult;
 

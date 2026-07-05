@@ -37,6 +37,8 @@ export interface CdpBridge {
     /** Channel-scoped preferred Antigravity account selection. */
     selectedAccountByChannel?: Map<string, string>;
     cdpHost: string;
+    chatSessionRepo?: any;
+    artifactService?: any;
 }
 
 const APPROVE_ACTION_PREFIX = 'approve_action';
@@ -63,7 +65,7 @@ function buildSessionRouteKey(projectName: string, sessionTitle: string): string
 }
 
 const GET_CURRENT_CHAT_TITLE_SCRIPT = `(() => {
-    const panel = document.querySelector('.antigravity-agent-side-panel');
+    const panel = document.querySelector('.antigravity-agent-side-panel') || document.body;
     if (!panel) return '';
     const header = panel.querySelector('div[class*="border-b"]');
     if (!header) return '';
@@ -403,6 +405,9 @@ export function ensureApprovalDetector(
         onApprovalRequired: async (info: ApprovalInfo) => {
             logger.debug(`[ApprovalDetector:${projectName}] Approval button detected (allow="${info.approveText}", deny="${info.denyText}")`);
 
+            // Emit approval event for bot text updating
+            cdp.emit('approval_required', info);
+
             const currentChatTitle = await getCurrentChatTitle(cdp);
             const targetChannel = resolveApprovalChannelForCurrentChat(bridge, projectName, currentChatTitle);
             const targetChannelId = targetChannel ? targetChannel.id : '';
@@ -441,6 +446,25 @@ export function ensureApprovalDetector(
             
             extraFields.push({ name: t('Deny button'), value: info.denyText || t('(None)'), inline: true });
 
+            // Resolve artifact review buttons if they exist
+            let walkthroughCustomId: string | undefined;
+            let taskCustomId: string | undefined;
+            if (bridge.chatSessionRepo && bridge.artifactService) {
+                const session = bridge.chatSessionRepo.findByChannelId(targetChannelId);
+                const activeConversationId = session?.conversationId;
+                if (activeConversationId) {
+                    const artifacts = bridge.artifactService.listArtifacts(activeConversationId);
+                    const walkthrough = artifacts.find((art: any) => art.filename.toLowerCase() === 'walkthrough.md');
+                    if (walkthrough) {
+                        walkthroughCustomId = `file_open:art:${activeConversationId}:walkthrough.md`;
+                    }
+                    const task = artifacts.find((art: any) => art.filename.toLowerCase() === 'task.md');
+                    if (task) {
+                        taskCustomId = `file_open:art:${activeConversationId}:task.md`;
+                    }
+                }
+            }
+
             const payload = buildApprovalNotification({
                 title: t('Approval Required'),
                 description: info.description || t('Antigravity is requesting approval for an action'),
@@ -449,6 +473,8 @@ export function ensureApprovalDetector(
                 extraFields,
                 hasAlwaysAllow: !!info.alwaysAllowText,
                 alwaysAllowText: info.alwaysAllowText,
+                walkthroughCustomId,
+                taskCustomId,
             });
 
             if (lastNotification) {
@@ -571,7 +597,7 @@ export function ensureErrorPopupDetector(
 
     // Track the most recent error notification for auto-disable on resolve.
     // See ensureApprovalDetector comment for tracking limitation rationale.
-    let lastNotification: { sent: PlatformSentMessage; payload: MessagePayload } | null = null;
+    let lastNotification: { sent: PlatformSentMessage; payload: MessagePayload; key: string | null } | null = null;
 
     const detector = new ErrorPopupDetector({
         cdpService: cdp,
@@ -611,12 +637,24 @@ export function ensureErrorPopupDetector(
                 ],
             });
 
+            if (lastNotification && detector.lastDetectedKey && lastNotification.key === detector.lastDetectedKey) {
+                // Cooldown triggered for the same popup; edit existing message instead of sending new
+                const edited = await lastNotification.sent.edit(payload).catch((err: any) => {
+                    logger.error(err);
+                    return null;
+                });
+                if (edited) {
+                    lastNotification.payload = payload;
+                }
+                return;
+            }
+
             const sent = await targetChannel.send(payload).catch((err: any) => {
                 logger.error(err);
                 return null;
             });
             if (sent) {
-                lastNotification = { sent, payload };
+                lastNotification = { sent, payload, key: detector.lastDetectedKey };
             }
         },
     });

@@ -268,9 +268,10 @@ export function extractAssistantSegmentsPayloadScript(): string {
         if (node.closest('details')) return true;
         if (node.closest('[class*="feedback"], footer')) return true;
         if (node.closest('.notify-user-container')) return true;
-        // Guard against approval dialogs leaking into the output (they contain plan cards or review buttons)
-        var dialogNode = node.closest('dialog, [role="dialog"], form');
-        if (dialogNode && dialogNode.querySelector('[data-testid="plan-card"], [class*="plan-summary"], .actions-container, .review-button')) {
+        if (node.closest('dialog, [role="dialog"]')) return true;
+        // Guard against other approval forms leaking into the output
+        var formNode = node.closest('form');
+        if (formNode && formNode.querySelector('[data-testid="plan-card"], [class*="plan-summary"], .actions-container, .review-button')) {
             return true;
         }
         
@@ -592,6 +593,25 @@ export function extractAssistantSegmentsPayloadScript(): string {
             });
         }
     }
+    // 4f. Artifact Cards
+    var artifactCards = artifactScope.querySelectorAll('[data-testid="artifact-card"], [class*="artifact-card"]');
+    for (var aci = 0; aci < artifactCards.length; aci++) {
+        var card = artifactCards[aci];
+        var titleEl = card.querySelector('.title, [class*="title"], h3, h4, span');
+        if (titleEl) {
+            var titleText = (titleEl.textContent || '').trim();
+            if (titleText) {
+                segments.push({
+                    kind: 'citation',
+                    text: titleText + '.md',
+                    role: 'assistant',
+                    messageIndex: 0,
+                    domPath: 'artifact-card:nth(' + aci + ')'
+                });
+            }
+        }
+    }
+
 
     if (!bodyFound && segments.length === 0) return null;
 

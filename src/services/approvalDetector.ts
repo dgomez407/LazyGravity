@@ -30,7 +30,7 @@ export interface ApprovalDetectorOptions {
  *
  * Detects allow/deny button pairs and extracts descriptions with fallbacks.
  */
-const DETECT_APPROVAL_SCRIPT = `(() => {
+export const DETECT_APPROVAL_SCRIPT = `(() => {
     const ALLOW_ONCE_PATTERNS = ['allow once', 'allow one time', 'yes, allow this time', '今回のみ許可', '1回のみ許可', '一度許可'];
     const ALWAYS_ALLOW_PATTERNS = [
         'allow this conversation',
@@ -46,7 +46,21 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
     const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
 
     const allButtons = Array.from(document.querySelectorAll('button, [role="button"], span.cursor-pointer, div.cursor-pointer'))
-        .filter(btn => btn.offsetParent !== null);
+        .filter(btn => btn.offsetParent !== null)
+        .reverse();
+
+    const STOP_PATTERNS_GEN = [/^stop$/, /^stop generating$/, /^stop response$/, /^停止$/, /^生成を停止$/, /^応答を停止$/];
+    const isGenerating = allButtons.some(btn => {
+        const tooltipId = btn.getAttribute('data-tooltip-id');
+        if (tooltipId === 'input-send-button-cancel-tooltip') return true;
+        const labels = [btn.textContent || '', btn.getAttribute('aria-label') || '', btn.getAttribute('title') || ''];
+        return labels.some(val => {
+            const normalized = (val || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+            return normalized && STOP_PATTERNS_GEN.some(re => re.test(normalized));
+        });
+    });
+
+    if (isGenerating) return null; // Wait for generation to finish!
 
     let approveBtn = allButtons.find(btn => {
         const t = normalize(btn.textContent || '');
@@ -69,7 +83,8 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
         || document.body;
 
     const containerButtons = Array.from(container.querySelectorAll('button, [role="button"], span.cursor-pointer, div.cursor-pointer'))
-        .filter(btn => btn.offsetParent !== null);
+        .filter(btn => btn.offsetParent !== null)
+        .reverse();
 
     const denyBtn = containerButtons.find(btn => {
         const t = normalize(btn.textContent || '');
@@ -83,9 +98,9 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
         return ALWAYS_ALLOW_PATTERNS.some(p => t.includes(p));
     }) || null;
 
-    const approveText = (approveBtn.textContent || '').trim();
-    const alwaysAllowText = alwaysAllowBtn ? (alwaysAllowBtn.textContent || '').trim() : '';
-    const denyText = (denyBtn.textContent || '').trim();
+    const approveText = (approveBtn.innerText || approveBtn.textContent || '').trim();
+    const alwaysAllowText = alwaysAllowBtn ? (alwaysAllowBtn.innerText || alwaysAllowBtn.textContent || '').trim() : '';
+    const denyText = (denyBtn.innerText || denyBtn.textContent || '').trim();
 
     // Description extraction (multiple fallbacks)
     let description = '';
@@ -116,6 +131,7 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
             }
             if (!modal) {
                 modal = approveBtn.parentElement?.parentElement?.parentElement || approveBtn.parentElement?.parentElement;
+                if (modal === document.body || modal?.id === 'root') modal = null;
             }
         }
 
@@ -124,8 +140,11 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
             const walk = (node) => {
                 if (node.nodeType === 1) {
                     // Skip buttons entirely
-                    if (node.tagName === 'BUTTON' || node.getAttribute('role') === 'button' || node.classList.contains('cursor-pointer')) return;
+                    if (node.tagName === 'BUTTON' || node.getAttribute('role') === 'button') return;
                     
+                    // Skip menu bars and sidebars
+                    if (node.tagName === 'NAV' || node.getAttribute('role') === 'menubar' || node.closest('nav') || node.closest('.monaco-menu') || node.closest('.sidebar') || node.classList.contains('sidebar')) return;
+
                     const display = window.getComputedStyle(node).display;
                     if (display === 'none') return;
                     
@@ -142,7 +161,11 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
             
             const parentText = parts.join(' ').replace(/\\n\\s*/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim();
             if (parentText.length > 5) {
-                description = parentText.length > 2000 ? parentText.substring(0, 2000) + '...\\n(truncated)' : parentText;
+                if (parentText.length > 800 || parentText.includes('F ile\\nE dit\\nS election')) {
+                    description = 'Code changes require your approval.';
+                } else {
+                    description = parentText;
+                }
             }
         }
     }
@@ -171,7 +194,7 @@ const EXPAND_ALWAYS_ALLOW_MENU_SCRIPT = `(() => {
     ];
 
     const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
-    const visibleButtons = Array.from(document.querySelectorAll('button'))
+    const visibleButtons = Array.from(document.querySelectorAll('button, [role="button"], span.cursor-pointer, div.cursor-pointer'))
         .filter(btn => btn.offsetParent !== null);
 
     const directAlways = visibleButtons.find(btn => {
@@ -191,7 +214,7 @@ const EXPAND_ALWAYS_ALLOW_MENU_SCRIPT = `(() => {
         || allowOnceBtn.parentElement
         || document.body;
 
-    const containerButtons = Array.from(container.querySelectorAll('button'))
+    const containerButtons = Array.from(container.querySelectorAll('button, [role="button"], span.cursor-pointer, div.cursor-pointer'))
         .filter(btn => btn.offsetParent !== null);
 
     const toggleBtn = containerButtons.find(btn => {
@@ -241,12 +264,18 @@ export function buildClickScript(buttonText: string): string {
         const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
         const text = ${safeText};
         const wanted = normalize(text);
-        const allButtons = Array.from(document.querySelectorAll('button, [role="button"], a, [class*="btn"], [class*="button"], [class*="action"]')).reverse();
+        const allButtons = Array.from(document.querySelectorAll('button, [role="button"], a.action-btn, a[class*="btn"], span.cursor-pointer, div.cursor-pointer')).reverse();
         const target = allButtons.find(btn => {
             const style = window.getComputedStyle(btn);
             if (style.display === 'none' || style.visibility === 'hidden' || btn.disabled) return false;
-            const buttonText = normalize(btn.textContent || '');
+            const buttonText = normalize(btn.innerText || btn.textContent || '');
             const ariaLabel = normalize(btn.getAttribute('aria-label') || '');
+            
+            const isShort = wanted.length < 5;
+            if (isShort) {
+                return buttonText === wanted || ariaLabel === wanted;
+            }
+            
             return buttonText === wanted ||
                 ariaLabel === wanted ||
                 (buttonText.includes(wanted) && buttonText.length < wanted.length + 10) ||

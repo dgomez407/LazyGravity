@@ -67,7 +67,7 @@ const GET_NEW_CHAT_BUTTON_SCRIPT = `(() => {
  * The title element is a div with the text-ellipsis class inside the header.
  */
 const GET_CHAT_TITLE_SCRIPT = `(() => {
-    const panel = document.querySelector('.antigravity-agent-side-panel');
+    const panel = document.querySelector('.antigravity-agent-side-panel') || document.body;
     if (!panel) return { title: '', hasActiveChat: false };
     const header = panel.querySelector('div[class*="border-b"]');
     if (!header) return { title: '', hasActiveChat: false };
@@ -86,7 +86,7 @@ const GET_CHAT_TITLE_SCRIPT = `(() => {
 })()`;
 
 const GET_SESSION_VIEW_STATE_SCRIPT = `(() => {
-    const panel = document.querySelector('.antigravity-agent-side-panel');
+    const panel = document.querySelector('.antigravity-agent-side-panel') || document.body;
     if (!panel) {
         return {
             panelFound: false,
@@ -199,7 +199,8 @@ const SCRAPE_PAST_CONVERSATIONS_SCRIPT = `(() => {
     // Try the visible QuickInput dialog first, then fall back to the side panel.
     const quickInputPanels = Array.from(document.querySelectorAll('div[class*="bg-quickinput-background"]'));
     const panel = quickInputPanels.find((el) => isVisible(el))
-        || document.querySelector('.antigravity-agent-side-panel');
+        || document.querySelector('.antigravity-agent-side-panel')
+        || document.body;
     if (!panel) return null;
 
     const items = [];
@@ -308,9 +309,11 @@ function buildActivateChatByTitleScript(title: string): string {
         for (const node of nodes) {
             const text = normalize(node.textContent || '');
             if (!text) continue;
+            
+            const isShort = wanted.length < 5;
             if (text === wanted) {
                 exact.push({ node, textLength: text.length });
-            } else if (text.includes(wanted)) {
+            } else if (!isShort && text.includes(wanted)) {
                 includes.push({ node, textLength: text.length });
             } else if (wordsMatch(text, wantedRaw)) {
                 fuzzy.push({ node, textLength: text.length });
@@ -402,10 +405,12 @@ export function buildActivateViaPastConversationsScript(title: string): string {
                     if (!pattern) continue;
                     const p = normalize(pattern);
                     const pLoose = normalizeLoose(pattern);
+                    const isShort = p.length < 5;
+                    
                     if (
                         text === p ||
-                        text.includes(p) ||
-                        (pLoose && (textLoose === pLoose || textLoose.includes(pLoose)))
+                        (pLoose && textLoose === pLoose) ||
+                        (!isShort && (text.includes(p) || (pLoose && textLoose.includes(pLoose))))
                     ) {
                         matched.push({ el, score: Math.abs(text.length - pattern.length) });
                         break;
@@ -650,7 +655,8 @@ export class ChatSessionService {
                 const isVisible = (el) => !!el && el instanceof HTMLElement && el.offsetParent !== null;
                 const quickInputPanels = Array.from(document.querySelectorAll('div[class*="bg-quickinput-background"]'));
                 const panel = quickInputPanels.find((el) => isVisible(el))
-                    || document.querySelector('.antigravity-agent-side-panel');
+                    || document.querySelector('.antigravity-agent-side-panel')
+                    || document.body;
                 if (!panel) return false;
                 const containers = Array.from(
                     panel.querySelectorAll('div[class*="overflow-auto"], div[class*="overflow-y-scroll"]')
@@ -1231,13 +1237,14 @@ export class ChatSessionService {
     /**
      * Rename the current chat in the Antigravity UI directly by updating the DOM.
      * Note: This is a cosmetic change until Antigravity persists a rename.
+     * IDE syncing for chat renaming is strictly "best-effort".
      */
     async renameCurrentChatInUI(cdpService: CdpService, newTitle: string): Promise<{ ok: boolean; error?: string }> {
         try {
             const contextId = cdpService.getPrimaryContextId();
             
             const RENAME_SCRIPT = `(() => {
-                const panel = document.querySelector('.antigravity-agent-side-panel');
+                const panel = document.querySelector('.antigravity-agent-side-panel') || document.body;
                 if (!panel) return { ok: false, error: 'Panel not found' };
                 const header = panel.querySelector('div[class*="border-b"]');
                 const titleEl = header?.querySelector('div[class*="text-ellipsis"]');

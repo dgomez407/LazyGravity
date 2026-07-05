@@ -76,9 +76,17 @@ export class ArtifactService {
     private readonly brainBasePath: string;
 
     constructor(brainBasePath?: string) {
-        this.brainBasePath =
-            brainBasePath ??
-            path.join(os.homedir(), '.gemini', 'antigravity', 'brain');
+        if (brainBasePath) {
+            this.brainBasePath = brainBasePath;
+        } else {
+            const idePath = path.join(os.homedir(), '.gemini', 'antigravity-ide', 'brain');
+            const defaultPath = path.join(os.homedir(), '.gemini', 'antigravity', 'brain');
+            this.brainBasePath = fs.existsSync(idePath) ? idePath : defaultPath;
+        }
+    }
+
+    public getBrainBasePath(): string {
+        return this.brainBasePath;
     }
 
     /**
@@ -225,21 +233,23 @@ export class ArtifactService {
                         const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
                         const content = buf.slice(0, bytesRead).toString('utf-8').toLowerCase();
                         
-                        if (filterStr && content.includes(filterStr)) {
-                            belongsToWorkspace = true;
+                        if (filterStr) {
+                            const escapedFilter = filterStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                            const regex = new RegExp(`(?:file:\\/\\/\\/[^"\\)]*?\\/|[a-zA-Z]:[\\\\/](?!.*(?:\\.gemini|brain|antigravity))[^"\\)]*?[\\\\/])${escapedFilter}\\b`, 'i');
+                            if (regex.test(content)) {
+                                belongsToWorkspace = true;
+                            }
                         }
                         
-                        if (belongsToWorkspace) {
-                            if (content.includes(needle)) {
-                                exactMatch = true;
-                            } else {
-                                const contentTokens = new Set(content.replace(/[^\p{L}\p{N}]+/gu, ' ').split(/\s+/));
-                                let currentScore = 0;
-                                for (const word of uniqueNeedleWords) {
-                                    if (contentTokens.has(word)) currentScore++;
-                                }
-                                if (currentScore > score) score = currentScore;
+                        if (content.includes(needle)) {
+                            exactMatch = true;
+                        } else {
+                            const contentTokens = new Set(content.replace(/[^\p{L}\p{N}]+/gu, ' ').split(/\s+/));
+                            let currentScore = 0;
+                            for (const word of uniqueNeedleWords) {
+                                if (contentTokens.has(word)) currentScore++;
                             }
+                            if (currentScore > score) score = currentScore;
                         }
                     } finally {
                         if (fd !== null) fs.closeSync(fd);
@@ -275,9 +285,11 @@ export class ArtifactService {
      * that has at least one artifact. Falls back to the most recent conversation
      * overall if none have artifacts.
      */
-    getLatestConversationWithArtifacts(): string | null {
+    getLatestConversationWithArtifacts(workspaceFilter?: string): string | null {
         const ids = this.listConversationIds();
         if (ids.length === 0) return null;
+
+        const filterStr = workspaceFilter ? workspaceFilter.toLowerCase() : null;
 
         // Sort by directory mtime descending
         const sorted = ids
@@ -291,12 +303,43 @@ export class ArtifactService {
             })
             .sort((a, b) => b.mtime - a.mtime);
 
-        // Find the first one that has artifacts
+        if (filterStr) {
+            const escapedFilter = filterStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const workspaceIds = sorted.filter(({ id }) => {
+                let belongs = false;
+                const regex = new RegExp(`(?:file:\\/\\/\\/[^"\\)]*?\\/|[a-zA-Z]:[\\\\/](?!.*(?:\\.gemini|brain|antigravity))[^"\\)]*?[\\\\/])${escapedFilter}\\b`, 'i');
+                const checkFile = (filePath: string) => {
+                    try {
+                        if (fs.existsSync(filePath)) {
+                            const content = fs.readFileSync(filePath, 'utf-8').toLowerCase();
+                            if (regex.test(content)) {
+                                belongs = true;
+                            }
+                        }
+                    } catch { /* ignore */ }
+                };
+                
+                checkFile(path.join(this.brainBasePath, id, '.system_generated', 'logs', 'transcript.jsonl'));
+                if (!belongs) {
+                    checkFile(path.join(this.brainBasePath, id, 'implementation_plan.md'));
+                }
+                return belongs;
+            });
+
+            if (workspaceIds.length === 0) return null;
+
+            const latestId = workspaceIds[0].id;
+            if (this.listArtifacts(latestId).length > 0) {
+                return latestId;
+            }
+            return null;
+        }
+
+        // Original fallback behavior for no filter
         for (const { id } of sorted) {
             if (this.listArtifacts(id).length > 0) return id;
         }
 
-        // Nothing has artifacts — return most recent anyway (caller handles empty list)
         return sorted[0]?.id ?? null;
     }
 

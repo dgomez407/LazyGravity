@@ -118,6 +118,7 @@ import { createPlatformButtonHandler } from '../handlers/buttonHandler';
 import { createPlatformSelectHandler } from '../handlers/selectHandler';
 import { createApprovalButtonAction } from '../handlers/approvalButtonAction';
 import { createPlanningButtonAction } from '../handlers/planningButtonAction';
+import { HeartbeatService, parseInterval, formatDuration, formatRelativeTime } from '../services/heartbeatService';
 import { createErrorPopupButtonAction } from '../handlers/errorPopupButtonAction';
 import { createRunCommandButtonAction } from '../handlers/runCommandButtonAction';
 import { createModelButtonAction } from '../handlers/modelButtonAction';
@@ -1332,6 +1333,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     const artifactService = new ArtifactService();
     const workspaceService = new WorkspaceService(config.workspaceBaseDir);
     const channelManager = new ChannelManager();
+    const heartbeatService = new HeartbeatService();
 
     // Auto-launch Antigravity with CDP port if not already running
     await ensureAntigravityRunning();
@@ -1488,6 +1490,9 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     client.once(Events.ClientReady, async (readyClient) => {
         logger.info(`Ready! Logged in as ${readyClient.user.tag} | extractionMode=${config.extractionMode}`);
 
+        heartbeatService.init(readyClient, bridge);
+        heartbeatService.start();
+
         try {
             await registerSlashCommands(discordToken, discordClientId, config.guildId);
         } catch (error) {
@@ -1577,6 +1582,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         channelManager,
         titleGenerator,
         antigravityAccounts: config.antigravityAccounts,
+        heartbeatService,
         handleSlashInteraction: async (
             interaction,
             handler,
@@ -1615,6 +1621,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             chatSessionRepoArg,
             artifactService,
             scheduleServiceArg,
+            heartbeatService,
         ),
         handleTemplateUse: async (interaction, templateId) => {
             const template = templateRepo.findById(templateId);
@@ -1757,6 +1764,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         accountPrefRepo,
         channelPrefRepo,
         antigravityAccounts: config.antigravityAccounts,
+        heartbeatService,
     }));
 
     await client.login(discordToken);
@@ -2077,6 +2085,7 @@ export async function handleSlashInteraction(
     chatSessionRepo?: ChatSessionRepository,
     artifactService?: ArtifactService,
     scheduleService?: ScheduleService,
+    heartbeatService?: HeartbeatService,
 ): Promise<void> {
     const commandName = interaction.commandName;
     const getAccountPort = (accountName: string): number | null => {
@@ -2707,6 +2716,92 @@ export async function handleSlashInteraction(
                 chatSessionRepo, 
                 artifactService 
             });
+            break;
+        }
+
+        case 'heartbeat': {
+            const subcommand = interaction.options.getSubcommand();
+            if (!heartbeatService) {
+                await interaction.editReply({ content: 'Heartbeat service not available.' });
+                break;
+            }
+
+            const envOverrides: string[] = [];
+            if (process.env.HEARTBEAT_ENABLED !== undefined) envOverrides.push('HEARTBEAT_ENABLED');
+            if (process.env.HEARTBEAT_INTERVAL_MS !== undefined) envOverrides.push('HEARTBEAT_INTERVAL_MS');
+            if (process.env.HEARTBEAT_CHANNEL_ID !== undefined) envOverrides.push('HEARTBEAT_CHANNEL_ID');
+
+            let warningPrefix = '';
+            if (envOverrides.length > 0) {
+                warningPrefix = `⚠️ **Warning**: Environment override(s) active: ${envOverrides.join(', ')}. Changes saved to config.json may not take effect until overrides are removed.\n\n`;
+            }
+
+            if (subcommand === 'on') {
+                const intervalStr = interaction.options.getString('interval') || '1h';
+                const targetChannel = interaction.options.getChannel('channel') || interaction.channel;
+                
+                if (!targetChannel || typeof (targetChannel as any).isTextBased !== 'function' || !(targetChannel as any).isTextBased()) {
+                    await interaction.editReply({ content: '⚠️ Please select a valid text channel.' });
+                    break;
+                }
+
+                // Check permissions
+                const botUser = interaction.client.user;
+                const permissions = (targetChannel as any).permissionsFor?.(botUser);
+                if (!permissions || !permissions.has('SendMessages')) {
+                    await interaction.editReply({ content: '⚠️ Bot does not have permission to send messages in that channel.' });
+                    break;
+                }
+
+                const intervalMs = parseInterval(intervalStr);
+                if (intervalMs === null || intervalMs <= 0) {
+                    await interaction.editReply({ content: '⚠️ Invalid interval format. Use a value with a unit, e.g. "1d", "1h", "30m" (bare numbers are not allowed).' });
+                    break;
+                }
+
+                if (intervalMs < 10000) {
+                    await interaction.editReply({ content: '⚠️ Interval must be at least 10 seconds.' });
+                    break;
+                }
+
+                if (intervalMs > 2147483647) {
+                    await interaction.editReply({ content: '⚠️ Interval cannot be greater than 24.8 days (2147483647 ms).' });
+                    break;
+                }
+
+                await heartbeatService.updateConfig(true, intervalMs, targetChannel.id);
+                await interaction.editReply({ 
+                    content: `${warningPrefix}💓 Heartbeat enabled! Sending updates every **${intervalStr}** to channel <#${targetChannel.id}>.` 
+                });
+            } else if (subcommand === 'off') {
+                await heartbeatService.disable();
+                await interaction.editReply({ content: `${warningPrefix}💓 Heartbeat disabled.` });
+            } else if (subcommand === 'status') {
+                const config = loadConfig();
+                const uptimeMs = Date.now() - heartbeatService.botStartTime;
+                const uptimeStr = formatDuration(uptimeMs);
+                const lastActivityStr = formatRelativeTime(heartbeatService.lastActivityTimestamp);
+
+                const activeWorkspaces = bridge.pool.getActiveWorkspaceNames();
+                const activeCount = activeWorkspaces.length;
+                const activeList = activeCount > 0 ? activeWorkspaces.join(', ') : 'None';
+
+                const intervalVal = config.heartbeatIntervalMs != null ? formatDuration(config.heartbeatIntervalMs) : 'N/A';
+
+                const statusEmbed = new EmbedBuilder()
+                    .setTitle('💓 Heartbeat Status')
+                    .setColor(config.heartbeatEnabled ? 0x00CC88 : 0x888888)
+                    .addFields(
+                        { name: 'Enabled', value: config.heartbeatEnabled ? '🟢 Yes' : '⚪ No', inline: true },
+                        { name: 'Interval', value: config.heartbeatEnabled ? intervalVal : 'N/A', inline: true },
+                        { name: 'Target Channel', value: config.heartbeatChannelId ? `<#${config.heartbeatChannelId}>` : 'N/A', inline: true },
+                        { name: 'Active Sessions', value: `${activeCount} (${activeList})`, inline: true },
+                        { name: 'Uptime', value: uptimeStr, inline: true },
+                        { name: 'Last Activity', value: lastActivityStr, inline: true },
+                    )
+                    .setTimestamp();
+                await interaction.editReply({ embeds: [statusEmbed] });
+            }
             break;
         }
 

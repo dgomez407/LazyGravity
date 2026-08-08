@@ -1,5 +1,5 @@
 import { logger } from '../utils/logger';
-import { CDP_PORTS } from '../utils/cdpPorts';
+import { getCdpCandidatePorts } from '../utils/cdpPorts';
 import { EventEmitter } from 'events';
 import * as http from 'http';
 import { execFile, spawn } from 'child_process';
@@ -265,7 +265,7 @@ export class CdpService extends EventEmitter {
         if (Number.isInteger(explicitPort) && explicitPort > 0) {
             return [explicitPort];
         }
-        return [...CDP_PORTS];
+        return getCdpCandidatePorts();
     }
 
     /**

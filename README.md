@@ -249,9 +249,12 @@ On Linux (especially when using AppImages), the `antigravity` command might not 
 You can specify the exact path to your executable by setting the `ANTIGRAVITY_PATH` environment variable in your `.env` file:
 ```env
 ANTIGRAVITY_PATH=/opt/applications/antigravity.AppImage
+# Optional: Specify a custom CDP port or multi-instance account mappings
+CDP_PORT=9888
+ANTIGRAVITY_ACCOUNTS=default:9222,work:9333@/path/to/user-data-dir
 ```
 
-> **Tip**: CDP ports are auto-scanned from candidates (9222, 9223, 9333, 9444, 9555, 9666).
+> **Tip**: CDP ports are auto-scanned from candidates (9222, 9223, 9333, 9444, 9555, 9666), as well as any custom ports specified in `.env` via `CDP_PORT` or `ANTIGRAVITY_ACCOUNTS`.
 > Launch Antigravity first, then start the bot — it connects automatically.
 
 ---

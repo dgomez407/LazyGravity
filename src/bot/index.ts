@@ -2316,8 +2316,11 @@ export async function handleSlashInteraction(
                         '`/template list` — Show templates with execute buttons (click to run)',
                         '`/template add <name> <prompt>` — Register a template',
                         '`/template delete <name>` — Delete a template',
+                        '`/template export` — Export all templates as a JSON file',
+                        '`/template import` — Bulk-import templates from a JSON file',
                     ].join('\n')
                 },
+
                 {
                     name: '🔧 System', value: [
                         '`/status` — Display overall bot status',
@@ -2424,6 +2427,67 @@ export async function handleSlashInteraction(
                 break;
             }
 
+            if (subcommand === 'export') {
+                const templates = templateRepo.findAll();
+                if (templates.length === 0) {
+                    await interaction.editReply({ content: '📝 No templates registered to export.' });
+                    break;
+                }
+                const jsonStr = templateRepo.exportTemplates();
+                const buffer = Buffer.from(jsonStr, 'utf-8');
+                await interaction.editReply({
+                    content: '📋 **LazyGravity Templates Export**',
+                    files: [{
+                        attachment: buffer,
+                        name: 'templates_export.json'
+                    }]
+                });
+                break;
+            }
+
+            if (subcommand === 'import') {
+                const attachment = interaction.options.getAttachment('file', true);
+                const conflictMode = (interaction.options.getString('conflict') as 'skip' | 'overwrite') || 'skip';
+
+                if (!attachment.name.endsWith('.json')) {
+                    await interaction.editReply({ content: '❌ Attachment must be a `.json` file.' });
+                    break;
+                }
+
+                if (attachment.size > 1024 * 1024) {
+                    await interaction.editReply({ content: '❌ Attachment exceeds maximum size limit of 1MB.' });
+                    break;
+                }
+
+                let timeoutId: NodeJS.Timeout | undefined;
+                try {
+                    const controller = new AbortController();
+                    timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                    const response = await fetch(attachment.url, { signal: controller.signal });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+                    const jsonText = await response.text();
+                    const stats = templateRepo.importTemplates(jsonText, conflictMode);
+
+                    let msg = `✅ **Template Import Complete**\n`;
+                    msg += `- Total in file: ${stats.total}\n`;
+                    msg += `- Imported: ${stats.imported}\n`;
+                    if (conflictMode === 'overwrite') {
+                        msg += `- Overwritten: ${stats.updated}\n`;
+                    } else {
+                        msg += `- Skipped (duplicates): ${stats.skipped}\n`;
+                    }
+
+                    await interaction.editReply({ content: msg });
+                } catch (error: any) {
+                    await interaction.editReply({ content: `❌ Failed to import templates: ${error.message}` });
+                } finally {
+                    if (timeoutId) clearTimeout(timeoutId);
+                }
+                break;
+            }
+
             let args: string[];
             switch (subcommand) {
                 case 'add': {
@@ -2445,6 +2509,7 @@ export async function handleSlashInteraction(
             await interaction.editReply({ content: result.message });
             break;
         }
+
 
         case 'status': {
             const activeNames = bridge.pool.getActiveWorkspaceNames();

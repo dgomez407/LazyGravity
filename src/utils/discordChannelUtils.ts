@@ -1,4 +1,4 @@
-import type { Message, MessageCreateOptions } from 'discord.js';
+import type { Message, MessageCreateOptions, MessagePayload } from 'discord.js';
 
 /**
  * Interface representing any channel or target object that supports sending messages.
@@ -6,10 +6,10 @@ import type { Message, MessageCreateOptions } from 'discord.js';
 export interface SendableChannel {
     /**
      * Send a message to the target channel.
-     * @param options Text string or MessageCreateOptions payload.
+     * @param options Text string, MessagePayload, or MessageCreateOptions payload.
      * @returns Created Message instance.
      */
-    send(options: string | MessageCreateOptions): Promise<Message>;
+    send(options: string | MessagePayload | MessageCreateOptions): Promise<Message>;
 }
 
 /**

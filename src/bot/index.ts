@@ -87,7 +87,7 @@ import {
 import { buildModeModelLines, fitForSingleEmbedDescription, splitForEmbedDescription } from '../utils/streamMessageFormatter';
 import { formatForDiscord, splitOutputAndLogs } from '../utils/discordFormatter';
 import { renderDiscordResponse } from '../platform/discord/discordResponseRenderer';
-import { ProcessLogBuffer } from '../utils/processLogBuffer';
+import { ProcessLogBuffer, createDefaultProcessLogBuffer } from '../utils/processLogBuffer';
 import {
     buildPromptWithAttachmentUrls,
     cleanupInboundImageAttachments,
@@ -453,10 +453,8 @@ async function sendPromptToAntigravity(
     let lastActivityLogText = '';
     const LIVE_RESPONSE_MAX_LEN = 3800;
     const LIVE_ACTIVITY_MAX_LEN = 3800;
-    const processLogBuffer = new ProcessLogBuffer({
+    const processLogBuffer = createDefaultProcessLogBuffer({
         maxChars: LIVE_ACTIVITY_MAX_LEN,
-        maxEntries: 120,
-        maxEntryLength: 220,
     });
     const liveResponseMessages: any[] = [];
     const liveActivityMessages: any[] = [];

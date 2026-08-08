@@ -111,6 +111,21 @@ describe('ArtifactService', () => {
             expect(decodedA?.conversationId).toBe(convA);
             expect(decodedB?.conversationId).toBe(convB);
         });
+
+        it('should reject decoding when encoded for convB but candidate list only contains convA (prefix collision)', () => {
+            const convA = '123e4567-aaaa-1111-2222-333333333333';
+            const convB = '123e4567-bbbb-4444-5555-666666666666';
+            const filename = 'walkthrough.md';
+
+            const encodedB = ArtifactService.encodeSelectValue(convB, filename);
+
+            const artifacts: ArtifactInfo[] = [
+                { conversationId: convA, filename, artifactType: 'ARTIFACT_TYPE_WALKTHROUGH', absolutePath: 'a' },
+            ];
+
+            const decoded = artifactService.decodeSelectValue(encodedB, artifacts);
+            expect(decoded).toBeNull();
+        });
     });
 
     describe('listArtifacts', () => {

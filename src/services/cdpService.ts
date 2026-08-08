@@ -15,19 +15,26 @@ export function parseProjectNameFromTitle(title?: string | null): string {
     if (!title || !title.trim()) return '';
     const trimmed = title.trim();
 
+    // 1. Explicit product suffix match (Antigravity / Antigravity IDE / Cascade)
     const productMatch = trimmed.match(/^(.*?)\s+[—–-]\s+(Antigravity(?: IDE)?|Cascade)$/i);
     if (productMatch && productMatch[1].trim()) {
         return productMatch[1].trim();
     }
 
-    const matches = Array.from(trimmed.matchAll(/\s+[—–-]\s+/g));
-    if (matches.length > 0) {
-        const lastMatch = matches[matches.length - 1];
-        const lastIndex = lastMatch.index!;
+    // 2. Em-dash (—) or En-dash (–) separator match takes priority over plain hyphen
+    const dashMatch = Array.from(trimmed.matchAll(/\s+[—–]\s+/g));
+    if (dashMatch.length > 0) {
+        const lastIndex = dashMatch[dashMatch.length - 1].index!;
         const namePart = trimmed.slice(0, lastIndex).trim();
-        if (namePart) {
-            return namePart;
-        }
+        if (namePart) return namePart;
+    }
+
+    // 3. Fallback to space-padded hyphen separator
+    const hyphenMatch = Array.from(trimmed.matchAll(/\s+-\s+/g));
+    if (hyphenMatch.length > 0) {
+        const lastIndex = hyphenMatch[hyphenMatch.length - 1].index!;
+        const namePart = trimmed.slice(0, lastIndex).trim();
+        if (namePart) return namePart;
     }
 
     return trimmed;

@@ -91,7 +91,7 @@ export function buildArtifactPickerUI(
     renderMode: 'thread' | 'inline' = 'thread',
 ): { embeds: EmbedBuilder[]; components: ActionRowBuilder<any>[] } {
     const embed = new EmbedBuilder()
-        .setTitle('📂 Artifacts')
+        .setTitle(t('📂 Artifacts'))
         .setColor(0x5865F2)
         .setTimestamp();
 

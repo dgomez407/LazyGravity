@@ -452,13 +452,22 @@ export class ArtifactService {
         if (parts.length < 4) return null;
         
         const shortConv = parts[1];
+        const hash = parts[2];
         const filename = parts.slice(3).join('_'); // Filename might contain underscores
 
-        // Find the matching artifact in the current list
-        const found = artifacts.find(a => 
-            a.filename === filename && 
-            a.conversationId.replace(/-/g, '').startsWith(shortConv)
-        );
+        // Find the matching artifact in the current list, requiring exact SHA-256 hash match
+        const found = artifacts.find(a => {
+            if (a.filename !== filename) return false;
+            if (!a.conversationId.replace(/-/g, '').startsWith(shortConv)) return false;
+
+            const expectedHash = crypto
+                .createHash('sha256')
+                .update(`${a.conversationId}:${a.filename}`)
+                .digest('hex')
+                .slice(0, 8);
+
+            return expectedHash === hash;
+        });
 
         return found ? { conversationId: found.conversationId, filename: found.filename } : null;
     }

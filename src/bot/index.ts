@@ -3094,12 +3094,48 @@ export async function handleSlashInteraction(
                         const response = await fetch(attachment.url, { signal: controller.signal });
                         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
+                        const MAX_BYTES = 1024 * 1024; // 1 MiB
                         const contentLength = response.headers.get('content-length');
-                        if (contentLength && parseInt(contentLength, 10) > 1024 * 1024) {
+                        if (contentLength && parseInt(contentLength, 10) > MAX_BYTES) {
                             throw new Error('Response body exceeds maximum size limit of 1MB.');
                         }
 
-                        jsonText = await response.text();
+                        if (response.body && typeof (response.body as any).getReader === 'function') {
+                            const reader = (response.body as any).getReader();
+                            const chunks: Uint8Array[] = [];
+                            let totalBytes = 0;
+
+                            try {
+                                while (true) {
+                                    const { done, value } = await reader.read();
+                                    if (done) break;
+                                    if (value) {
+                                        totalBytes += value.length;
+                                        if (totalBytes > MAX_BYTES) {
+                                            controller.abort();
+                                            throw new Error('Response body exceeds maximum size limit of 1MB.');
+                                        }
+                                        chunks.push(value);
+                                    }
+                                }
+                            } finally {
+                                if (reader.releaseLock) reader.releaseLock();
+                            }
+
+                            const combined = new Uint8Array(totalBytes);
+                            let offset = 0;
+                            for (const chunk of chunks) {
+                                combined.set(chunk, offset);
+                                offset += chunk.length;
+                            }
+                            jsonText = new TextDecoder().decode(combined);
+                        } else {
+                            const arrayBuffer = await response.arrayBuffer();
+                            if (arrayBuffer.byteLength > MAX_BYTES) {
+                                throw new Error('Response body exceeds maximum size limit of 1MB.');
+                            }
+                            jsonText = new TextDecoder().decode(arrayBuffer);
+                        }
                     } finally {
                         if (timeoutId) {
                             clearTimeout(timeoutId);

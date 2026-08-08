@@ -1632,7 +1632,9 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                         remaining = remaining.slice(chunk.length).replace(/^\n/, '');
                     }
                     
-                    const sendableChannel = targetChannel && 'send' in targetChannel ? (targetChannel as { send: Function }) : null;
+                    const sendableChannel = targetChannel && typeof (targetChannel as any).send === 'function'
+                        ? (targetChannel as { send(options: { content: string; allowedMentions?: { parse?: string[] } }): Promise<unknown> })
+                        : null;
                     if (sendableChannel) {
                         await sendableChannel.send({ content: chunk, allowedMentions: { parse: [] } }).catch(logger.error);
                     } else {

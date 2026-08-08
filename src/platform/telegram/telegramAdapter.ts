@@ -85,6 +85,18 @@ export class TelegramAdapter implements PlatformAdapter {
                 this.emitError(err);
             });
         }
+
+        // Confirm authentication and startup completion via explicit getMe check
+        try {
+            if (this.bot.api?.getMe) {
+                await this.bot.api.getMe();
+            }
+        } catch (err: unknown) {
+            logger.error('[TelegramAdapter] Readiness check failed (getMe error):', err instanceof Error ? err.message : err);
+            this.emitError(err);
+            throw err;
+        }
+
         this.started = true;
 
         if (this.events.onReady) {

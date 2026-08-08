@@ -45,6 +45,45 @@ describe('ArtifactService', () => {
             const decoded = artifactService.decodeSelectValue('art_unknown', []);
             expect(decoded).toBeNull();
         });
+
+        it('should reject tampered or changed hashes', () => {
+            const conversationId = '123e4567-e89b-12d3-a456-426614174000';
+            const filename = 'implementation_plan.md';
+            const encoded = ArtifactService.encodeSelectValue(conversationId, filename);
+            
+            // Tamper with the hash segment (middle part)
+            const parts = encoded.split('_');
+            parts[2] = 'deadbeef';
+            const tampered = parts.join('_');
+
+            const artifacts: ArtifactInfo[] = [
+                { conversationId, filename, artifactType: 'ARTIFACT_TYPE_IMPLEMENTATION_PLAN', absolutePath: 'ignored' }
+            ];
+
+            const decoded = artifactService.decodeSelectValue(tampered, artifacts);
+            expect(decoded).toBeNull();
+        });
+
+        it('should correctly resolve between two conversation IDs sharing the same short prefix and filename', () => {
+            // Both IDs share the same 8-char shortConv prefix ('123e4567')
+            const convA = '123e4567-aaaa-1111-2222-333333333333';
+            const convB = '123e4567-bbbb-4444-5555-666666666666';
+            const filename = 'walkthrough.md';
+
+            const encodedA = ArtifactService.encodeSelectValue(convA, filename);
+            const encodedB = ArtifactService.encodeSelectValue(convB, filename);
+
+            const artifacts: ArtifactInfo[] = [
+                { conversationId: convA, filename, artifactType: 'ARTIFACT_TYPE_WALKTHROUGH', absolutePath: 'a' },
+                { conversationId: convB, filename, artifactType: 'ARTIFACT_TYPE_WALKTHROUGH', absolutePath: 'b' }
+            ];
+
+            const decodedA = artifactService.decodeSelectValue(encodedA, artifacts);
+            const decodedB = artifactService.decodeSelectValue(encodedB, artifacts);
+
+            expect(decodedA?.conversationId).toBe(convA);
+            expect(decodedB?.conversationId).toBe(convB);
+        });
     });
 
     describe('listArtifacts', () => {

@@ -2,6 +2,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import { ArtifactService, ArtifactInfo } from '../../src/services/artifactService';
 
 describe('ArtifactService', () => {
@@ -22,9 +23,15 @@ describe('ArtifactService', () => {
             const conversationId = '123e4567-e89b-12d3-a456-426614174000';
             const filename = 'implementation_plan.md';
             
+            const expectedHash = crypto
+                .createHash('sha256')
+                .update(`${conversationId}:${filename}`)
+                .digest('hex')
+                .slice(0, 8);
+
             const encoded = ArtifactService.encodeSelectValue(conversationId, filename);
-            // Format: art_123e4567_[8-char sha256 hex hash]_implementation_plan.md
-            expect(encoded).toMatch(/^art_123e4567_[a-f0-9]{8}_implementation_plan\.md$/);
+            // Assert exact known SHA-256 hash for the fixture
+            expect(encoded).toBe(`art_123e4567_${expectedHash}_implementation_plan.md`);
 
             const artifacts: ArtifactInfo[] = [
                 {
@@ -61,6 +68,26 @@ describe('ArtifactService', () => {
             ];
 
             const decoded = artifactService.decodeSelectValue(tampered, artifacts);
+            expect(decoded).toBeNull();
+        });
+
+        it('should reject decoding when filename is swapped but original hash is retained', () => {
+            const conversationId = '123e4567-e89b-12d3-a456-426614174000';
+            const originalFile = 'implementation_plan.md';
+            const swappedFile = 'walkthrough.md';
+
+            // Generate encoded value for implementation_plan.md
+            const encodedOriginal = ArtifactService.encodeSelectValue(conversationId, originalFile);
+            
+            // Swap out implementation_plan.md with walkthrough.md in the select string while retaining original hash
+            const hash = encodedOriginal.split('_')[2];
+            const swappedSelectValue = `art_123e4567_${hash}_${swappedFile}`;
+
+            const artifacts: ArtifactInfo[] = [
+                { conversationId, filename: swappedFile, artifactType: 'ARTIFACT_TYPE_WALKTHROUGH', absolutePath: 'ignored' }
+            ];
+
+            const decoded = artifactService.decodeSelectValue(swappedSelectValue, artifacts);
             expect(decoded).toBeNull();
         });
 

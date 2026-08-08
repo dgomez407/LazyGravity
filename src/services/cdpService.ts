@@ -9,12 +9,28 @@ import WebSocket from 'ws';
 /**
  * Extract the workspace/project name from a window or document title.
  * Handles em-dash (—), en-dash (–), and hyphen (-).
- * E.g., "ProjectName — Antigravity" -> "ProjectName"
+ * E.g., "My - Project — Antigravity" -> "My - Project"
  */
 export function parseProjectNameFromTitle(title?: string | null): string {
     if (!title || !title.trim()) return '';
-    const parts = title.split(/\s[—–-]\s/);
-    return parts[0].trim();
+    const trimmed = title.trim();
+
+    const productMatch = trimmed.match(/^(.*?)\s+[—–-]\s+(Antigravity(?: IDE)?|Cascade)$/i);
+    if (productMatch && productMatch[1].trim()) {
+        return productMatch[1].trim();
+    }
+
+    const matches = Array.from(trimmed.matchAll(/\s+[—–-]\s+/g));
+    if (matches.length > 0) {
+        const lastMatch = matches[matches.length - 1];
+        const lastIndex = lastMatch.index!;
+        const namePart = trimmed.slice(0, lastIndex).trim();
+        if (namePart) {
+            return namePart;
+        }
+    }
+
+    return trimmed;
 }
 
 /** Configuration options for the CDP service. */

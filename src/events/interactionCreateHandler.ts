@@ -1522,10 +1522,10 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
             }
 
             try {
-                const artifactService = new ArtifactService();
+                const artifactService = deps.artifactService || new ArtifactService();
 
                 // Resolve the selected artifact by rescanning and matching the encoded value
-                const channelId = (interaction as any).channelId as string;
+                const channelId = interaction.channelId;
                 const session = deps.chatSessionRepo?.findByChannelId(channelId);
                 const sessionTitle = session?.displayName?.trim() ?? '';
                 const workspaceDirName = getWorkspaceDirName(session);
@@ -1555,9 +1555,10 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                 // Get user render mode
                 const renderMode = deps.userPrefRepo?.getArtifactRenderMode(interaction.user.id) ?? 'thread';
 
-                let targetChannel: any = interaction.channel;
+                let targetChannel = interaction.channel;
+                const channelHasThreads = interaction.channel && 'threads' in interaction.channel;
 
-                if (renderMode === 'thread' && deps.artifactThreadRepo && (interaction as any).channel?.threads) {
+                if (renderMode === 'thread' && deps.artifactThreadRepo && channelHasThreads) {
                     try {
                         const existingThreadId = deps.artifactThreadRepo.getThreadId(channelId, conversationId, decoded.filename);
                         let thread: any = null;
@@ -1631,8 +1632,9 @@ export function createInteractionCreateHandler(deps: InteractionCreateHandlerDep
                         remaining = remaining.slice(chunk.length).replace(/^\n/, '');
                     }
                     
-                    if (targetChannel && targetChannel.send) {
-                        await targetChannel.send({ content: chunk, allowedMentions: { parse: [] } }).catch(logger.error);
+                    const sendableChannel = targetChannel && 'send' in targetChannel ? (targetChannel as { send: Function }) : null;
+                    if (sendableChannel) {
+                        await sendableChannel.send({ content: chunk, allowedMentions: { parse: [] } }).catch(logger.error);
                     } else {
                         await interaction.followUp({ content: chunk, allowedMentions: { parse: [] } }).catch(logger.error);
                     }

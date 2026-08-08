@@ -12,6 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import { logger } from '../utils/logger';
 
 // ---------------------------------------------------------------------------
@@ -425,16 +426,14 @@ export class ArtifactService {
      * @returns Encoded select value string.
      */
     static encodeSelectValue(conversationId: string, filename: string): string {
-        const shortConv = conversationId.replace(/-/g, '').slice(0, 12);
-        // Simple hash of the filename
-        let hash = 0;
-        for (let i = 0; i < filename.length; i++) {
-            hash = ((hash << 5) - hash) + filename.charCodeAt(i);
-            hash |= 0; // Convert to 32bit integer
-        }
-        const shortHash = Math.abs(hash).toString(36).slice(0, 4);
+        const shortConv = conversationId.replace(/-/g, '').slice(0, 8);
+        const hash = crypto
+            .createHash('sha256')
+            .update(`${conversationId}:${filename}`)
+            .digest('hex')
+            .slice(0, 8);
         
-        return `art_${shortConv}_${shortHash}_${filename}`;
+        return `art_${shortConv}_${hash}_${filename}`;
     }
 
     /**

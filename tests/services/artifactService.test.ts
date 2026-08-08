@@ -23,8 +23,8 @@ describe('ArtifactService', () => {
             const filename = 'implementation_plan.md';
             
             const encoded = ArtifactService.encodeSelectValue(conversationId, filename);
-            // New format includes a 4-char hash, e.g. art_123e4567e89b_abcd_implementation_plan.md
-            expect(encoded).toMatch(/^art_123e4567e89b_[a-z0-9]{4}_implementation_plan\.md$/);
+            // Format: art_123e4567_[8-char sha256 hex hash]_implementation_plan.md
+            expect(encoded).toMatch(/^art_123e4567_[a-f0-9]{8}_implementation_plan\.md$/);
 
             const artifacts: ArtifactInfo[] = [
                 {

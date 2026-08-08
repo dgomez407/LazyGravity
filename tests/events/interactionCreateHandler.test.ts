@@ -383,4 +383,71 @@ describe('interactionCreateHandler', () => {
             })
         );
     });
+
+    it('uses injected artifactService when handling string select menu artifact selections', async () => {
+        const deferUpdate = jest.fn().mockResolvedValue(undefined);
+        const editReply = jest.fn().mockResolvedValue(undefined);
+        const followUp = jest.fn().mockResolvedValue(undefined);
+
+        const mockArtifactService = {
+            findConversationByTitle: jest.fn().mockReturnValue('conv-123'),
+            listArtifacts: jest.fn().mockReturnValue([
+                { conversationId: 'conv-123', filename: 'plan.md', artifactType: 'ARTIFACT_TYPE_IMPLEMENTATION_PLAN' },
+            ]),
+            decodeSelectValue: jest.fn().mockReturnValue({ conversationId: 'conv-123', filename: 'plan.md' }),
+            getArtifactContent: jest.fn().mockReturnValue('Plan details content'),
+        };
+
+        const chatSessionRepo = {
+            findByChannelId: jest.fn().mockReturnValue({ displayName: 'My Session', conversationId: 'conv-123' }),
+        };
+
+        const interaction = {
+            isAutocomplete: () => false,
+            isButton: () => false,
+            isStringSelectMenu: () => true,
+            isChatInputCommand: () => false,
+            customId: 'artifact_select',
+            values: ['art_conv123_hash_plan.md'],
+            channelId: 'channel-a',
+            user: { id: 'allowed' },
+            deferUpdate,
+            editReply,
+            followUp,
+        } as any;
+
+        const handler = createInteractionCreateHandler({
+            config: { allowedUserIds: ['allowed'] },
+            bridge: {} as any,
+            cleanupHandler: {} as any,
+            modeService: {} as any,
+            modelService: {} as any,
+            slashCommandHandler: {} as any,
+            wsHandler: { getWorkspaceForChannel: jest.fn() } as any,
+            chatHandler: {} as any,
+            client: {} as any,
+            sendModeUI: jest.fn(),
+            sendModelsUI: jest.fn(),
+            sendAutoAcceptUI: jest.fn(),
+            handleScreenshot: jest.fn(),
+            getCurrentCdp: jest.fn(),
+            parseApprovalCustomId: jest.fn().mockReturnValue(null),
+            parseErrorPopupCustomId: jest.fn().mockReturnValue(null),
+            parsePlanningCustomId: jest.fn().mockReturnValue(null),
+            parseFileChangeCustomId: jest.fn().mockReturnValue(null),
+            parseRunCommandCustomId: jest.fn().mockReturnValue(null),
+            handleSlashInteraction: jest.fn(),
+            artifactService: mockArtifactService as any,
+            chatSessionRepo: chatSessionRepo as any,
+        });
+
+        await handler(interaction);
+
+        expect(deferUpdate).toHaveBeenCalled();
+        expect(mockArtifactService.decodeSelectValue).toHaveBeenCalledWith(
+            'art_conv123_hash_plan.md',
+            expect.any(Array),
+        );
+        expect(mockArtifactService.getArtifactContent).toHaveBeenCalledWith('conv-123', 'plan.md');
+    });
 });

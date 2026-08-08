@@ -128,6 +128,7 @@ describe('TelegramAdapter', () => {
 
             await expect(adapter.start(events)).rejects.toThrow('Unauthorized token');
 
+            expect(bot.start).not.toHaveBeenCalled();
             expect(bot.stop).toHaveBeenCalledTimes(1);
             expect(events.onError).toHaveBeenCalledTimes(1);
             expect(adapter['events']).toBeNull();
